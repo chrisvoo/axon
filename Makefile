@@ -1,4 +1,4 @@
-.PHONY: build test clean release-assets web
+.PHONY: build test clean release-assets web dev
 
 BINARY=axon
 
@@ -10,6 +10,11 @@ web:
 
 build: web
 	go build -o $(BINARY) ./cmd/axon
+
+# Run locally over plain HTTP (no TLS) so Cursor can connect without cert setup.
+# Requires axon init to have been run at least once (for API key + denylist).
+dev:
+	go run ./cmd/axon serve -dev -no-browser
 
 test:
 	go test ./...

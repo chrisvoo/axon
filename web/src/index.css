@@ -1,6 +1,14 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Class-based dark mode (the <html> element gets .dark at runtime) */
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme {
+  --font-family-sans: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  --font-family-mono: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+@plugin "@tailwindcss/forms";
 
 body {
   margin: 0;

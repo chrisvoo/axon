@@ -168,14 +168,50 @@ Axon serves a small **dashboard** at the **origin** of the agent, e.g. `https://
 
 The **MCP config (Cursor)** panel matches what **`axon serve`** prints: **copyable JSON** for `mcp.json`, a **`cursor://…` one-click install link** (with an explicit warning that it contains the key), **Open in Cursor**, **Copy install link**, and a link to **[Cursor’s MCP install links / generator](https://cursor.com/docs/context/mcp/install-links)** for transparency.
 
+## Local development (simulating remote assistance)
+
+During development you can run Axon on your own machine over **plain HTTP** — no TLS setup, no certificate trust required — and point Cursor at `localhost` as if it were a remote box.
+
+```bash
+axon init   # only needed once; creates API key and denylist (cert is unused in dev mode)
+axon serve -dev
+# or: make dev
+```
+
+The `-dev` flag switches the server to plain HTTP and prints a ready-to-paste snippet:
+
+```
+⚠  DEV MODE — plain HTTP, no TLS. Do not expose this port externally.
+Axon 0.1.0 listening on http://0.0.0.0:8443/mcp
+Dashboard: http://127.0.0.1:8443/
+API key:   axon_k_...
+
+Add to .cursor/mcp.json (dev — do not commit the key):
+{
+  "mcpServers": {
+    "axon-dev": {
+      "url": "http://127.0.0.1:8443/mcp",
+      "headers": {
+        "Authorization": "Bearer axon_k_..."
+      }
+    }
+  }
+}
+```
+
+Paste the snippet into `.cursor/mcp.json` (or `~/.cursor/mcp.json` for global use), reload Cursor, and all Axon tools appear under the `axon-dev` server entry.
+
+> **Security:** `-dev` is for local development only. The HTTP port has no transport encryption; never expose it outside `localhost`.
+
 ## Commands
 
-| Command   | Description                                      |
-|----------|---------------------------------------------------|
-| `axon init`   | Create config, API key, TLS cert, denylist file   |
-| `axon serve`  | Start HTTPS MCP server (`-addr`, `-port` flags)   |
-| `axon status` | Show paths and certificate fingerprint            |
-| `axon keygen` | Rotate API key                                    |
+| Command              | Description                                              |
+|----------------------|----------------------------------------------------------|
+| `axon init`          | Create config, API key, TLS cert, denylist file          |
+| `axon serve`         | Start HTTPS MCP server (`-addr`, `-port` flags)          |
+| `axon serve -dev`    | Plain HTTP, no TLS — local development only              |
+| `axon status`        | Show paths and certificate fingerprint                   |
+| `axon keygen`        | Rotate API key                                           |
 
 ## Configuration
 

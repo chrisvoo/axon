@@ -28,6 +28,8 @@ type Options struct {
 	Version string
 	Events  *events.Bus
 	Hub     *hub.Hub
+	// DevMode disables TLS and runs plain HTTP. For local development only.
+	DevMode bool
 }
 
 // Run starts the HTTPS server until context is cancelled.
@@ -165,24 +167,33 @@ func Run(ctx context.Context, cfg *config.Config, deny *security.Denylist, log *
 	}
 
 	addr := fmt.Sprintf("%s:%d", cfg.ListenAddr, cfg.ListenPort)
-	tlsCfg, err := security.LoadTLSConfig(cfg.CertFile, cfg.KeyFile)
-	if err != nil {
-		return err
-	}
 
 	srv := &http.Server{
 		Handler: loggingMiddleware(mux),
 	}
 
-	ln, err := net.Listen("tcp", addr)
-	if err != nil {
-		return err
+	var ln net.Listener
+	if opts.DevMode {
+		rawLn, err := net.Listen("tcp", addr)
+		if err != nil {
+			return err
+		}
+		ln = rawLn
+	} else {
+		tlsCfg, err := security.LoadTLSConfig(cfg.CertFile, cfg.KeyFile)
+		if err != nil {
+			return err
+		}
+		rawLn, err := net.Listen("tcp", addr)
+		if err != nil {
+			return err
+		}
+		ln = tls.NewListener(rawLn, tlsCfg)
 	}
-	tlsLn := tls.NewListener(ln, tlsCfg)
 
 	errCh := make(chan error, 1)
 	go func() {
-		errCh <- srv.Serve(tlsLn)
+		errCh <- srv.Serve(ln)
 	}()
 
 	select {
@@ -218,6 +229,12 @@ func MCPHTTPSURL(listenAddr string, port int) string {
 	return fmt.Sprintf("https://%s:%d/mcp", h, port)
 }
 
+// MCPHTTPDevURL is the plain-HTTP endpoint URL used in dev mode (no TLS).
+func MCPHTTPDevURL(listenAddr string, port int) string {
+	h := ResolveMCPDisplayHost(listenAddr)
+	return fmt.Sprintf("http://%s:%d/mcp", h, port)
+}
+
 // CursorMCPInstallDeeplink builds a Cursor-specific install link (cursor://…/mcp/install).
 // serverKey is the MCP server id (e.g. "axon"). mcpURL must be the full https://…/mcp URL.
 // The link embeds the API key in the query string — treat it as a secret.
@@ -243,6 +260,22 @@ func CursorMCPInstallDeeplink(serverKey, mcpURL, apiKey string) (string, error) 
 		url.QueryEscape(serverKey),
 		url.QueryEscape(enc),
 	), nil
+}
+
+// PrettyMCPDevConfig returns a JSON snippet for Cursor mcp.json using plain HTTP (dev mode).
+func PrettyMCPDevConfig(listenAddr string, port int, apiKey string) string {
+	m := map[string]any{
+		"mcpServers": map[string]any{
+			"axon-dev": map[string]any{
+				"url": MCPHTTPDevURL(listenAddr, port),
+				"headers": map[string]string{
+					"Authorization": "Bearer " + apiKey,
+				},
+			},
+		},
+	}
+	b, _ := json.MarshalIndent(m, "", "  ")
+	return string(b)
 }
 
 // PrettyMCPConfig returns a JSON snippet for Cursor mcp.json.

@@ -61,11 +61,15 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `axon %s — secure remote MCP agent
 
 Commands:
-  init      Create config, TLS certificate, API key, and default denylist
-  serve     Start HTTPS MCP server
-  status    Show configuration paths and certificate fingerprint
-  keygen    Rotate API key
-  version   Print version
+  init         Create config, TLS certificate, API key, and default denylist
+  serve        Start HTTPS MCP server
+    -dev       Plain HTTP, no TLS (local development only)
+    -addr      Override listen address
+    -port      Override listen port
+    -no-browser  Skip opening the dashboard in a browser
+  status       Show configuration paths and certificate fingerprint
+  keygen       Rotate API key
+  version      Print version
 
 `, version)
 }
@@ -115,6 +119,7 @@ func cmdServe() error {
 	addr := fs.String("addr", "", "override listen address (default from config)")
 	port := fs.Int("port", 0, "override listen port")
 	noBrowser := fs.Bool("no-browser", false, "do not open the dashboard in a browser")
+	dev := fs.Bool("dev", false, "development mode: plain HTTP, no TLS (localhost only)")
 	_ = fs.Parse(os.Args[2:])
 
 	cfg, err := config.Load()
@@ -140,6 +145,38 @@ func cmdServe() error {
 		return err
 	}
 
+	bus := events.NewBus()
+	h := hub.NewHub(bus, version)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	if *dev {
+		host := cfg.ListenAddr
+		if host == "" || host == "0.0.0.0" {
+			host = "127.0.0.1"
+		}
+		dashboardURL := fmt.Sprintf("http://%s:%d/", host, cfg.ListenPort)
+		fmt.Println("⚠  DEV MODE — plain HTTP, no TLS. Do not expose this port externally.")
+		fmt.Printf("Axon %s listening on http://%s:%d/mcp\n", version, cfg.ListenAddr, cfg.ListenPort)
+		fmt.Printf("Dashboard: %s\n", dashboardURL)
+		fmt.Printf("API key:   %s\n\n", cfg.APIKey)
+		fmt.Println("Add to .cursor/mcp.json (dev — do not commit the key):")
+		fmt.Println(server.PrettyMCPDevConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey))
+		fmt.Println()
+
+		if !*noBrowser {
+			go openBrowser(dashboardURL)
+		}
+
+		return server.Run(ctx, cfg, deny, log, server.Options{
+			Version: version,
+			Events:  bus,
+			Hub:     h,
+			DevMode: true,
+		})
+	}
+
 	fp, err := security.CertFingerprint(cfg.CertFile)
 	if err != nil {
 		return err
@@ -161,12 +198,6 @@ func cmdServe() error {
 		fmt.Println(deep)
 		fmt.Println()
 	}
-
-	bus := events.NewBus()
-	h := hub.NewHub(bus, version)
-
-	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
 
 	if !*noBrowser {
 		go openBrowser(dashboardURL)

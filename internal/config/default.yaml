@@ -1,0 +1,10 @@
+listen_addr: "0.0.0.0"
+listen_port: 8443
+ip_allowlist: []
+rate_limit_rps: 20
+idle_timeout: "0"
+shell_timeout: "5m"
+input_stall_seconds: 5
+read_only: false
+audit_log: "audit.log"
+denylist_file: "denylist.txt"

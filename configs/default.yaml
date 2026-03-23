@@ -1,0 +1,28 @@
+# Axon default configuration (merged with user config at ~/.axon/config.yaml)
+
+listen_addr: "0.0.0.0"
+listen_port: 8443
+
+# Optional: restrict MCP access to these IPs (empty = allow all)
+ip_allowlist: []
+
+# Rate limit: max requests per second per IP (0 = disabled)
+rate_limit_rps: 20
+
+# Idle timeout: stop server after no requests (0 = disabled, duration string e.g. "30m")
+idle_timeout: "0"
+
+# Shell command timeout (duration string)
+shell_timeout: "5m"
+
+# Seconds of no output while process still running -> input_required
+input_stall_seconds: 5
+
+# Read-only: only read_file, grep, glob, system_info (no shell write edit)
+read_only: false
+
+# Audit log path (relative to config dir if not absolute)
+audit_log: "audit.log"
+
+# Embedded denylist patterns file (relative to config dir)
+denylist_file: "denylist.txt"

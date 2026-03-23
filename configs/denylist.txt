@@ -1,0 +1,9 @@
+rm -rf /
+rm -rf /*
+mkfs
+dd if=/dev/zero
+:(){ :|:& };:
+chmod -R 777 /
+> /dev/sd
+curl | sh
+wget | sh

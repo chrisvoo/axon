@@ -262,6 +262,26 @@ func CursorMCPInstallDeeplink(serverKey, mcpURL, apiKey string) (string, error) 
 	), nil
 }
 
+// PrettyMCPConfigForURL builds a Cursor mcp.json snippet for an arbitrary MCP endpoint URL.
+// Use this when the public URL is provided externally (e.g. via a Cloudflare tunnel).
+func PrettyMCPConfigForURL(serverName, mcpURL, apiKey string) string {
+	if serverName == "" {
+		serverName = "axon"
+	}
+	m := map[string]any{
+		"mcpServers": map[string]any{
+			serverName: map[string]any{
+				"url": mcpURL,
+				"headers": map[string]string{
+					"Authorization": "Bearer " + apiKey,
+				},
+			},
+		},
+	}
+	b, _ := json.MarshalIndent(m, "", "  ")
+	return string(b)
+}
+
 // PrettyMCPDevConfig returns a JSON snippet for Cursor mcp.json using plain HTTP (dev mode).
 func PrettyMCPDevConfig(listenAddr string, port int, apiKey string) string {
 	m := map[string]any{

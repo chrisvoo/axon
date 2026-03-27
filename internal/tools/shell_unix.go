@@ -138,18 +138,3 @@ func runShellPlatform(ctx context.Context, command string, cmdTimeout, stall tim
 	}
 }
 
-func tailLines(s string, maxLines int) string {
-	if maxLines <= 0 {
-		return s
-	}
-	lines := 0
-	for i := len(s) - 1; i >= 0; i-- {
-		if s[i] == '\n' {
-			lines++
-			if lines >= maxLines {
-				return s[i+1:]
-			}
-		}
-	}
-	return s
-}

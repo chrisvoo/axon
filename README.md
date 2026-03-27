@@ -15,11 +15,37 @@ Axon is a **standalone Go agent** that listens on **HTTPS** and exposes an [**MC
 
 ## Install
 
-### From source
+### From source (module proxy — installs binary to `$GOPATH/bin`)
 
 ```bash
 go install github.com/chrisvoo/axon/cmd/axon@latest
 ```
+
+### From a local clone (development / remote machine)
+
+Requires Go 1.21+. No build step needed — `go run` compiles and executes in one shot:
+
+```bash
+git clone https://github.com/chrisvoo/axon.git
+cd axon
+
+go run ./cmd/axon init    # first-time setup
+go run ./cmd/axon serve   # start the server
+```
+
+Or build a permanent binary first:
+
+```bash
+go build -o axon ./cmd/axon
+./axon init
+./axon serve
+```
+
+> **Linux firewall tip:** if you want Cursor on another machine to reach Axon, open the listen port first:
+> ```bash
+> sudo ufw allow 8443/tcp
+> ```
+> Alternatively, use `axon serve -tunnel` (see [Cloudflare Tunnel](#cloudflare-tunnel-public-access-without-port-forwarding)) to get a public URL without touching the firewall.
 
 ### Linux / macOS (script)
 
@@ -168,6 +194,41 @@ Axon serves a small **dashboard** at the **origin** of the agent, e.g. `https://
 
 The **MCP config (Cursor)** panel matches what **`axon serve`** prints: **copyable JSON** for `mcp.json`, a **`cursor://…` one-click install link** (with an explicit warning that it contains the key), **Open in Cursor**, **Copy install link**, and a link to **[Cursor’s MCP install links / generator](https://cursor.com/docs/context/mcp/install-links)** for transparency.
 
+## Cloudflare Tunnel (public access without port forwarding)
+
+If the remote machine is behind NAT or you don't want to open firewall ports, use `-tunnel` to create a temporary public HTTPS URL via [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/).
+
+**Requirements:** [`cloudflared`](https://github.com/cloudflare/cloudflared/releases) must be in `PATH` on the remote machine.
+
+```bash
+# install cloudflared (Linux example)
+curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
+  -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
+
+axon init    # one-time setup
+axon serve -tunnel
+```
+
+After a few seconds, Axon prints the public URL and a ready-to-paste snippet:
+
+```
+Cloudflare Tunnel ready: https://random-words.trycloudflare.com
+
+Add to .cursor/mcp.json:
+{
+  "mcpServers": {
+    "axon": {
+      "url": "https://random-words.trycloudflare.com/mcp",
+      "headers": { "Authorization": "Bearer axon_k_..." }
+    }
+  }
+}
+```
+
+Paste it into `~/.cursor/mcp.json` on your Mac and reload Cursor — no TLS setup, no public IP, no firewall rules needed.
+
+> **Note:** `-tunnel` implies `-dev` (plain HTTP locally; Cloudflare provides HTTPS termination). The `trycloudflare.com` URL is temporary and changes on each run. For a permanent URL, set up a [named tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/) with your own domain.
+
 ## Local development (simulating remote assistance)
 
 During development you can run Axon on your own machine over **plain HTTP** — no TLS setup, no certificate trust required — and point Cursor at `localhost` as if it were a remote box.
@@ -205,13 +266,14 @@ Paste the snippet into `.cursor/mcp.json` (or `~/.cursor/mcp.json` for global us
 
 ## Commands
 
-| Command              | Description                                              |
-|----------------------|----------------------------------------------------------|
-| `axon init`          | Create config, API key, TLS cert, denylist file          |
-| `axon serve`         | Start HTTPS MCP server (`-addr`, `-port` flags)          |
-| `axon serve -dev`    | Plain HTTP, no TLS — local development only              |
-| `axon status`        | Show paths and certificate fingerprint                   |
-| `axon keygen`        | Rotate API key                                           |
+| Command                 | Description                                                        |
+|-------------------------|--------------------------------------------------------------------|
+| `axon init`             | Create config, API key, TLS cert, denylist file                    |
+| `axon serve`            | Start HTTPS MCP server (`-addr`, `-port` flags)                    |
+| `axon serve -dev`       | Plain HTTP, no TLS — local development only                        |
+| `axon serve -tunnel`    | Cloudflare quick tunnel — public HTTPS URL, no port forwarding     |
+| `axon status`           | Show paths and certificate fingerprint                             |
+| `axon keygen`           | Rotate API key                                                     |
 
 ## Configuration
 

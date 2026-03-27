@@ -19,6 +19,7 @@ import (
 	"github.com/chrisvoo/axon/internal/rootcheck"
 	"github.com/chrisvoo/axon/internal/security"
 	"github.com/chrisvoo/axon/internal/server"
+	"github.com/chrisvoo/axon/internal/tunnel"
 )
 
 const version = "0.1.0"
@@ -61,15 +62,17 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `axon %s — secure remote MCP agent
 
 Commands:
-  init         Create config, TLS certificate, API key, and default denylist
-  serve        Start HTTPS MCP server
-    -dev       Plain HTTP, no TLS (local development only)
-    -addr      Override listen address
-    -port      Override listen port
-    -no-browser  Skip opening the dashboard in a browser
-  status       Show configuration paths and certificate fingerprint
-  keygen       Rotate API key
-  version      Print version
+  init            Create config, TLS certificate, API key, and default denylist
+  serve           Start HTTPS MCP server
+    -dev          Plain HTTP, no TLS (local development only)
+    -tunnel       Start a Cloudflare quick tunnel and print the public mcp.json snippet
+                  (implies -dev; requires cloudflared in PATH)
+    -addr         Override listen address
+    -port         Override listen port
+    -no-browser   Skip opening the dashboard in a browser
+  status          Show configuration paths and certificate fingerprint
+  keygen          Rotate API key
+  version         Print version
 
 `, version)
 }
@@ -120,6 +123,7 @@ func cmdServe() error {
 	port := fs.Int("port", 0, "override listen port")
 	noBrowser := fs.Bool("no-browser", false, "do not open the dashboard in a browser")
 	dev := fs.Bool("dev", false, "development mode: plain HTTP, no TLS (localhost only)")
+	useTunnel := fs.Bool("tunnel", false, "start a Cloudflare quick tunnel and print the public mcp.json snippet (implies -dev)")
 	_ = fs.Parse(os.Args[2:])
 
 	cfg, err := config.Load()
@@ -151,7 +155,11 @@ func cmdServe() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if *dev {
+	if *dev || *useTunnel {
+		// Tunnel mode: bind only on loopback; cloudflared provides the public HTTPS endpoint.
+		if *useTunnel {
+			cfg.ListenAddr = "127.0.0.1"
+		}
 		host := cfg.ListenAddr
 		if host == "" || host == "0.0.0.0" {
 			host = "127.0.0.1"
@@ -161,9 +169,32 @@ func cmdServe() error {
 		fmt.Printf("Axon %s listening on http://%s:%d/mcp\n", version, cfg.ListenAddr, cfg.ListenPort)
 		fmt.Printf("Dashboard: %s\n", dashboardURL)
 		fmt.Printf("API key:   %s\n\n", cfg.APIKey)
-		fmt.Println("Add to .cursor/mcp.json (dev — do not commit the key):")
-		fmt.Println(server.PrettyMCPDevConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey))
-		fmt.Println()
+
+		if *useTunnel {
+			localURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.ListenPort)
+			fmt.Println("Starting Cloudflare Tunnel… (this may take a few seconds)")
+			go func() {
+				err := tunnel.StartTrycloudflare(ctx, localURL, func(publicURL string) {
+					mcpURL := publicURL + "/mcp"
+					fmt.Printf("\nCloudflare Tunnel ready: %s\n\n", publicURL)
+					fmt.Println("Add to .cursor/mcp.json:")
+					fmt.Println(server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey))
+					deep, err := server.CursorMCPInstallDeeplink("axon", mcpURL, cfg.APIKey)
+					if err == nil {
+						fmt.Println("\nCursor one-click install (contains API key — do not share):")
+						fmt.Println(deep)
+					}
+					fmt.Println()
+				})
+				if err != nil && ctx.Err() == nil {
+					fmt.Fprintf(os.Stderr, "\ncloudflared error: %v\n", err)
+				}
+			}()
+		} else {
+			fmt.Println("Add to .cursor/mcp.json (dev — do not commit the key):")
+			fmt.Println(server.PrettyMCPDevConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey))
+			fmt.Println()
+		}
 
 		if !*noBrowser {
 			go openBrowser(dashboardURL)

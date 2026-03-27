@@ -17,15 +17,18 @@ describe('cursorMcpInstallDeeplink', () => {
     expect(link).toContain('name=axon')
   })
 
-  it('embeds the MCP URL and API key in the Base64 config param', () => {
+  it('embeds the MCP URL and API key directly in the Base64 config param (no server-name wrapper)', () => {
     const link = cursorMcpInstallDeeplink('axon', 'https://my.host/mcp', 'axon_k_secret')
     const rawUrl = link.replace('cursor://', 'https://')
     const params = new URL(rawUrl).searchParams
+    // Cursor uses `name` as the mcpServers key; config must be the transport
+    // object directly so it doesn't produce double-nesting.
     const decoded = JSON.parse(atob(params.get('config')!)) as {
-      axon: { url: string; headers: { Authorization: string } }
+      url: string
+      headers: { Authorization: string }
     }
-    expect(decoded.axon.url).toBe('https://my.host/mcp')
-    expect(decoded.axon.headers.Authorization).toBe('Bearer axon_k_secret')
+    expect(decoded.url).toBe('https://my.host/mcp')
+    expect(decoded.headers.Authorization).toBe('Bearer axon_k_secret')
   })
 
   it('URL-encodes the config param', () => {

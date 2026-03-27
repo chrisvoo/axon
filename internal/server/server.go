@@ -242,12 +242,13 @@ func CursorMCPInstallDeeplink(serverKey, mcpURL, apiKey string) (string, error) 
 	if serverKey == "" {
 		serverKey = "axon"
 	}
+	// Cursor uses the `name` query param as the mcpServers key, so the config
+	// payload must be the transport object directly — NOT wrapped in the server name.
+	// Wrapping produces double-nesting: mcpServers.<name>.<name>.{url,headers}.
 	payload := map[string]any{
-		serverKey: map[string]any{
-			"url": mcpURL,
-			"headers": map[string]string{
-				"Authorization": "Bearer " + apiKey,
-			},
+		"url": mcpURL,
+		"headers": map[string]string{
+			"Authorization": "Bearer " + apiKey,
 		},
 	}
 	b, err := json.Marshal(payload)

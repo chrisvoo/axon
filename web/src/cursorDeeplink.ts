@@ -16,12 +16,13 @@ function utf8ToBase64(str: string): string {
  */
 export function cursorMcpInstallDeeplink(serverKey: string, mcpUrl: string, apiKey: string): string {
   const key = serverKey.trim() || 'axon'
+  // Cursor uses the `name` query param as the mcpServers key, so the config
+  // payload must be the transport object directly — NOT wrapped in the server name.
+  // Wrapping produces double-nesting: mcpServers.<name>.<name>.{url,headers}.
   const payload = {
-    [key]: {
-      url: mcpUrl,
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-      },
+    url: mcpUrl,
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
     },
   }
   const config = utf8ToBase64(JSON.stringify(payload))

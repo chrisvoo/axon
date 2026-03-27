@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"regexp"
 	"sync"
@@ -61,6 +62,33 @@ func StartTrycloudflare(ctx context.Context, localURL string, onURL func(publicU
 
 	if err := cmd.Wait(); err != nil {
 		// Context cancellation causes a non-zero exit — that's expected.
+		if ctx.Err() != nil {
+			return nil
+		}
+		return fmt.Errorf("cloudflared exited: %w", err)
+	}
+	return nil
+}
+
+// StartNamedTunnel runs a pre-configured named Cloudflare tunnel.
+// Unlike StartTrycloudflare, the public URL is known in advance from the
+// tunnel's DNS mapping — no output scanning is required. cloudflared output
+// is forwarded to the parent process stdout/stderr so the user can monitor
+// connection status. It blocks until ctx is cancelled or cloudflared exits.
+func StartNamedTunnel(ctx context.Context, tunnelName string) error {
+	if _, err := exec.LookPath("cloudflared"); err != nil {
+		return ErrNotFound{}
+	}
+
+	cmd := exec.CommandContext(ctx, "cloudflared", "tunnel", "run", tunnelName)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start cloudflared: %w", err)
+	}
+
+	if err := cmd.Wait(); err != nil {
 		if ctx.Err() != nil {
 			return nil
 		}

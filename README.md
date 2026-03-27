@@ -196,7 +196,7 @@ The **MCP config (Cursor)** panel matches what **`axon serve`** prints: **copyab
 
 ## Cloudflare Tunnel (public access without port forwarding)
 
-If the remote machine is behind NAT or you don't want to open firewall ports, use `-tunnel` to create a temporary public HTTPS URL via [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/).
+If the remote machine is behind NAT or you don't want to open firewall ports, Cloudflare Tunnel lets you expose Axon over a public HTTPS URL with no port forwarding, no public IP, and no TLS certificate management.
 
 **Requirements:** [`cloudflared`](https://github.com/cloudflare/cloudflared/releases) must be in `PATH` on the remote machine.
 
@@ -204,15 +204,21 @@ If the remote machine is behind NAT or you don't want to open firewall ports, us
 # install cloudflared (Linux example)
 curl -L https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-amd64 \
   -o /usr/local/bin/cloudflared && chmod +x /usr/local/bin/cloudflared
+```
 
+### Quick tunnel (no account needed — temporary URL)
+
+The fastest way to get started. Axon spawns `cloudflared` automatically and prints a ready-to-paste snippet:
+
+```bash
 axon init    # one-time setup
 axon serve -tunnel
 ```
 
-After a few seconds, Axon prints the public URL and a ready-to-paste snippet:
+After a few seconds Axon prints:
 
 ```
-Cloudflare Tunnel ready: https://random-words.trycloudflare.com
+Cloudflare quick tunnel ready: https://random-words.trycloudflare.com
 
 Add to .cursor/mcp.json:
 {
@@ -225,9 +231,65 @@ Add to .cursor/mcp.json:
 }
 ```
 
-Paste it into `~/.cursor/mcp.json` on your Mac and reload Cursor — no TLS setup, no public IP, no firewall rules needed.
+Paste it into `~/.cursor/mcp.json` on your Mac and reload Cursor.
 
-> **Note:** `-tunnel` implies `-dev` (plain HTTP locally; Cloudflare provides HTTPS termination). The `trycloudflare.com` URL is temporary and changes on each run. For a permanent URL, set up a [named tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/get-started/) with your own domain.
+> **Note:** The `trycloudflare.com` URL changes on every restart. You will need to update `mcp.json` and reload Cursor each time. For a permanent URL, use a named tunnel (below).
+
+### Named tunnel (permanent URL — recommended for regular use)
+
+A named tunnel gives you a **stable hostname** (e.g. `https://axon.yourdomain.com`) that survives restarts. Set it up once; never touch `mcp.json` again.
+
+#### One-time setup (on the Linux machine)
+
+**Prerequisites:** a domain (or subdomain) managed by Cloudflare DNS, and a free Cloudflare account.
+
+```bash
+# 1. Log in — opens browser, saves ~/.cloudflared/cert.pem
+cloudflared tunnel login
+
+# 2. Create the tunnel (remember the UUID it prints)
+cloudflared tunnel create axon-mcp
+
+# 3. Map a hostname to it (replace with your actual domain)
+cloudflared tunnel route dns axon-mcp axon.yourdomain.com
+
+# 4. Create ~/.cloudflared/config.yml
+cat > ~/.cloudflared/config.yml <<'EOF'
+tunnel: axon-mcp
+credentials-file: /home/<you>/.cloudflared/<uuid>.json
+ingress:
+  - hostname: axon.yourdomain.com
+    service: http://localhost:8443
+  - service: http_status:404
+EOF
+```
+
+Replace `<you>` with your Linux username and `<uuid>` with the UUID printed in step 2.
+
+#### Running with the named tunnel
+
+```bash
+axon init   # one-time, if not already done
+axon serve -tunnel-name axon-mcp -tunnel-url https://axon.yourdomain.com
+```
+
+Axon immediately prints the permanent mcp.json snippet and one-click deeplink, then starts `cloudflared tunnel run axon-mcp` in the background:
+
+```
+Named Cloudflare Tunnel: https://axon.yourdomain.com
+
+Add to .cursor/mcp.json (permanent — update only when key changes):
+{
+  "mcpServers": {
+    "axon": {
+      "url": "https://axon.yourdomain.com/mcp",
+      "headers": { "Authorization": "Bearer axon_k_..." }
+    }
+  }
+}
+```
+
+Add this snippet to `~/.cursor/mcp.json` on your Mac **once**. Because the URL is permanent, you never need to update it — even after restarting Axon on the Linux machine.
 
 ## Local development (simulating remote assistance)
 
@@ -271,7 +333,8 @@ Paste the snippet into `.cursor/mcp.json` (or `~/.cursor/mcp.json` for global us
 | `axon init`             | Create config, API key, TLS cert, denylist file                    |
 | `axon serve`            | Start HTTPS MCP server (`-addr`, `-port` flags)                    |
 | `axon serve -dev`       | Plain HTTP, no TLS — local development only                        |
-| `axon serve -tunnel`    | Cloudflare quick tunnel — public HTTPS URL, no port forwarding     |
+| `axon serve -tunnel`    | Cloudflare quick tunnel — temporary public HTTPS URL               |
+| `axon serve -tunnel-name N -tunnel-url U` | Named Cloudflare tunnel — permanent public URL  |
 | `axon status`           | Show paths and certificate fingerprint                             |
 | `axon keygen`           | Rotate API key                                                     |
 

@@ -67,6 +67,9 @@ Commands:
     -dev          Plain HTTP, no TLS (local development only)
     -tunnel       Start a Cloudflare quick tunnel and print the public mcp.json snippet
                   (implies -dev; requires cloudflared in PATH)
+    -tunnel-name  Named Cloudflare tunnel to run (requires -tunnel-url)
+    -tunnel-url   Public URL of the named tunnel, e.g. https://axon.example.com
+                  (requires -tunnel-name; implies -dev)
     -addr         Override listen address
     -port         Override listen port
     -no-browser   Skip opening the dashboard in a browser
@@ -124,7 +127,13 @@ func cmdServe() error {
 	noBrowser := fs.Bool("no-browser", false, "do not open the dashboard in a browser")
 	dev := fs.Bool("dev", false, "development mode: plain HTTP, no TLS (localhost only)")
 	useTunnel := fs.Bool("tunnel", false, "start a Cloudflare quick tunnel and print the public mcp.json snippet (implies -dev)")
+	tunnelName := fs.String("tunnel-name", "", "named Cloudflare tunnel to run (requires -tunnel-url)")
+	tunnelURL := fs.String("tunnel-url", "", "public URL of the named tunnel, e.g. https://axon.example.com (requires -tunnel-name)")
 	_ = fs.Parse(os.Args[2:])
+
+	if (*tunnelName == "") != (*tunnelURL == "") {
+		return fmt.Errorf("-tunnel-name and -tunnel-url must be used together")
+	}
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -155,24 +164,39 @@ func cmdServe() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
-	if *dev || *useTunnel {
-		// Tunnel mode: bind only on loopback; cloudflared provides the public HTTPS endpoint.
-		if *useTunnel {
-			cfg.ListenAddr = "127.0.0.1"
-		}
-		host := cfg.ListenAddr
-		if host == "" || host == "0.0.0.0" {
-			host = "127.0.0.1"
-		}
-		dashboardURL := fmt.Sprintf("http://%s:%d/", host, cfg.ListenPort)
+	useNamedTunnel := *tunnelName != ""
+
+	if *dev || *useTunnel || useNamedTunnel {
+		// All tunnel/dev modes bind on loopback; cloudflared (or the user) provides the public endpoint.
+		cfg.ListenAddr = "127.0.0.1"
+		dashboardURL := fmt.Sprintf("http://127.0.0.1:%d/", cfg.ListenPort)
 		fmt.Println("⚠  DEV MODE — plain HTTP, no TLS. Do not expose this port externally.")
-		fmt.Printf("Axon %s listening on http://%s:%d/mcp\n", version, cfg.ListenAddr, cfg.ListenPort)
+		fmt.Printf("Axon %s listening on http://127.0.0.1:%d/mcp\n", version, cfg.ListenPort)
 		fmt.Printf("Dashboard: %s\n", dashboardURL)
 		fmt.Printf("API key:   %s\n\n", cfg.APIKey)
 
-		if *useTunnel {
+		switch {
+		case useNamedTunnel:
+			mcpURL := *tunnelURL + "/mcp"
+			fmt.Printf("Named Cloudflare Tunnel: %s\n\n", *tunnelURL)
+			fmt.Println("Add to .cursor/mcp.json (permanent — update only when key changes):")
+			fmt.Println(server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey))
+			deep, err := server.CursorMCPInstallDeeplink("axon", mcpURL, cfg.APIKey)
+			if err == nil {
+				fmt.Println("\nCursor one-click install (contains API key — do not share):")
+				fmt.Println(deep)
+			}
+			fmt.Println()
+			fmt.Printf("Starting named tunnel %q…\n", *tunnelName)
+			go func() {
+				if err := tunnel.StartNamedTunnel(ctx, *tunnelName); err != nil && ctx.Err() == nil {
+					fmt.Fprintf(os.Stderr, "\ncloudflared error: %v\n", err)
+				}
+			}()
+
+		case *useTunnel:
 			localURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.ListenPort)
-			fmt.Println("Starting Cloudflare Tunnel… (this may take a few seconds)")
+			fmt.Println("Starting Cloudflare quick tunnel… (this may take a few seconds)")
 			go func() {
 				err := tunnel.StartTrycloudflare(ctx, localURL, func(publicURL string) {
 					mcpURL := publicURL + "/mcp"
@@ -190,7 +214,8 @@ func cmdServe() error {
 					fmt.Fprintf(os.Stderr, "\ncloudflared error: %v\n", err)
 				}
 			}()
-		} else {
+
+		default:
 			fmt.Println("Add to .cursor/mcp.json (dev — do not commit the key):")
 			fmt.Println(server.PrettyMCPDevConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey))
 			fmt.Println()

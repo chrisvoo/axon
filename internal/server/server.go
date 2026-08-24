@@ -314,3 +314,39 @@ func PrettyMCPConfig(listenAddr string, port int, apiKey string) string {
 	b, _ := json.MarshalIndent(m, "", "  ")
 	return string(b)
 }
+
+// ClaudeCodeMCPConfig returns a .claude/settings.json snippet that uses env vars
+// so the API key is never hard-coded in the committed file.
+func ClaudeCodeMCPConfig(mcpURL string) string {
+	m := map[string]any{
+		"mcpServers": map[string]any{
+			"axon": map[string]any{
+				"type": "http",
+				"url":  mcpURL,
+				"headers": map[string]string{
+					"Authorization": "Bearer ${AXON_MCP_TOKEN}",
+				},
+			},
+		},
+	}
+	b, _ := json.MarshalIndent(m, "", "  ")
+	return string(b)
+}
+
+// ClaudeCodeMCPConfigWithEnvURL returns the .claude/settings.json snippet using
+// both AXON_MCP_URL and AXON_MCP_TOKEN env vars (idiomatic when the URL also changes).
+func ClaudeCodeMCPConfigWithEnvURL() string {
+	m := map[string]any{
+		"mcpServers": map[string]any{
+			"axon": map[string]any{
+				"type": "http",
+				"url":  "${AXON_MCP_URL}",
+				"headers": map[string]string{
+					"Authorization": "Bearer ${AXON_MCP_TOKEN}",
+				},
+			},
+		},
+	}
+	b, _ := json.MarshalIndent(m, "", "  ")
+	return string(b)
+}

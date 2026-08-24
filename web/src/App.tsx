@@ -1,10 +1,11 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useAxonSocket } from './hooks/useAxonSocket'
 import type { ActivityRow, ActivityStatus, AxonEvent } from './types'
 import { API_KEY_STORAGE } from './types'
 import { ActivityLog } from './components/ActivityLog'
 import { ConnectScreen } from './components/ConnectScreen'
 import { MCPConfigPanel } from './components/MCPConfigPanel'
+import { PrivilegedModal } from './components/PrivilegedModal'
 import { SessionStats } from './components/SessionStats'
 import { SystemStatus } from './components/SystemStatus'
 
@@ -96,7 +97,24 @@ function reduceActivity(rows: Map<string, ActivityRow>, event: AxonEvent): Map<s
 }
 
 export default function App() {
-  const [apiKey, setApiKey] = useState<string | null>(() => sessionStorage.getItem(API_KEY_STORAGE))
+  const [apiKey, setApiKey] = useState<string | null>(() => {
+    const stored = sessionStorage.getItem(API_KEY_STORAGE)
+    if (stored) return stored
+    // Auto-connect when the dashboard URL contains #<api-key> (set by the server on startup)
+    const hash = window.location.hash.slice(1)
+    if (hash) {
+      sessionStorage.setItem(API_KEY_STORAGE, hash)
+      return hash
+    }
+    return null
+  })
+
+  // Remove the key from the URL bar so it doesn't sit in browser history
+  useEffect(() => {
+    if (window.location.hash) {
+      window.history.replaceState(null, '', window.location.pathname + window.location.search)
+    }
+  }, [])
   const [wsConnected, setWsConnected] = useState(false)
   const [agentVersion, setAgentVersion] = useState<string | undefined>()
   const [connectedAt, setConnectedAt] = useState<number | null>(null)
@@ -104,6 +122,7 @@ export default function App() {
   const [rows, setRows] = useState<Map<string, ActivityRow>>(() => new Map())
   const [requestCount, setRequestCount] = useState(0)
   const [errorCount, setErrorCount] = useState(0)
+  const [privilegedModal, setPrivilegedModal] = useState<{ commands: string[] } | null>(null)
 
   const onEvent = useCallback((event: AxonEvent) => {
     if (event.type === 'connected') {
@@ -114,6 +133,13 @@ export default function App() {
     }
     if (event.type === 'system_stats') {
       setSystemStats((event.data as Record<string, unknown>) ?? null)
+      return
+    }
+    if (event.type === 'privileged_commands') {
+      const cmds = event.data?.commands
+      setPrivilegedModal({
+        commands: Array.isArray(cmds) ? (cmds as string[]) : [String(event.data?.command ?? '')],
+      })
       return
     }
     if (event.type === 'tool_called') {
@@ -134,8 +160,9 @@ export default function App() {
 
   useAxonSocket(apiKey, { onEvent, onConnectionChange: onConnectionChange })
 
+  // Newest first: newer items appear at top of the list
   const sortedItems = useMemo(() => {
-    return [...rows.values()].sort((a, b) => a.createdAt - b.createdAt)
+    return [...rows.values()].sort((a, b) => b.createdAt - a.createdAt)
   }, [rows])
 
   const handleConnect = (key: string) => {
@@ -159,6 +186,12 @@ export default function App() {
 
   return (
     <div className="flex min-h-screen flex-col lg:flex-row">
+      {privilegedModal && (
+        <PrivilegedModal
+          commands={privilegedModal.commands}
+          onClose={() => setPrivilegedModal(null)}
+        />
+      )}
       <aside className="flex w-full flex-col gap-4 border-b border-zinc-800 p-4 lg:w-80 lg:border-b-0 lg:border-r">
         <div>
           <div className="text-lg font-semibold text-white">Axon</div>

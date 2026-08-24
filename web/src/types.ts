@@ -6,6 +6,7 @@ export type AxonEventType =
   | 'system_stats'
   | 'dashboard_input'
   | 'dashboard_cancel'
+  | 'privileged_commands'
 
 export type AxonEvent = {
   type: AxonEventType

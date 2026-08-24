@@ -201,25 +201,37 @@ func (s *Server) handleToolsCall(ctx context.Context, w http.ResponseWriter, req
 	case "shell":
 		cmd, _ := params.Arguments["command"].(string)
 		s.Audit.Log(audit.Entry{RemoteIP: remoteIP, Action: "shell", Detail: cmd})
-		shellRes, err = tools.RunShell(ctx, s.Cfg, s.Deny, s.Cfg.ReadOnly, cmd, s.Procs)
-		if err == nil {
-			var b []byte
-			b, err = tools.ShellResultJSON(shellRes)
-			text = string(b)
-			if shellRes.Status == "input_required" {
-				s.publish(events.Event{
-					Type: "input_required",
-					Data: map[string]any{
-						"call_id":    callID,
-						"process_id": shellRes.ProcessID,
-						"command":    shellRes.Command,
-						"last_output": previewText(
-							shellRes.LastOutput,
-							2000,
-						),
-						"hint": shellRes.Hint,
-					},
-				})
+		if isPrivilegedCmd(cmd) {
+			cmds := splitPrivilegedCommands(cmd)
+			s.publish(events.Event{
+				Type: "privileged_commands",
+				Data: map[string]any{
+					"call_id":  callID,
+					"commands": cmds,
+				},
+			})
+			text = `{"status":"requires_user_action","message":"This command requires elevated privileges and cannot be run automatically. It has been sent to the dashboard for the remote user to execute manually."}`
+		} else {
+			shellRes, err = tools.RunShell(ctx, s.Cfg, s.Deny, s.Cfg.ReadOnly, cmd, s.Procs)
+			if err == nil {
+				var b []byte
+				b, err = tools.ShellResultJSON(shellRes)
+				text = string(b)
+				if shellRes.Status == "input_required" {
+					s.publish(events.Event{
+						Type: "input_required",
+						Data: map[string]any{
+							"call_id":    callID,
+							"process_id": shellRes.ProcessID,
+							"command":    shellRes.Command,
+							"last_output": previewText(
+								shellRes.LastOutput,
+								2000,
+							),
+							"hint": shellRes.Hint,
+						},
+					})
+				}
 			}
 		}
 	case "read_file":
@@ -353,6 +365,40 @@ func toInt(v any) (int, bool) {
 	default:
 		return 0, false
 	}
+}
+
+// isPrivilegedCmd returns true if cmd contains a sudo invocation.
+func isPrivilegedCmd(cmd string) bool {
+	for i := 0; i <= len(cmd)-4; i++ {
+		if cmd[i:i+4] != "sudo" {
+			continue
+		}
+		before := i == 0 || isShellBoundary(cmd[i-1])
+		after := i+4 >= len(cmd) || cmd[i+4] == ' ' || cmd[i+4] == '\t' || isShellBoundary(cmd[i+4])
+		if before && after {
+			return true
+		}
+	}
+	return false
+}
+
+func isShellBoundary(b byte) bool {
+	return b == ' ' || b == '\t' || b == '\n' || b == '\r' || b == ';' || b == '&' || b == '|' || b == '('
+}
+
+// splitPrivilegedCommands splits a multi-line command into individual lines,
+// keeping one-liners intact.
+func splitPrivilegedCommands(cmd string) []string {
+	var out []string
+	for _, line := range strings.Split(cmd, "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			out = append(out, t)
+		}
+	}
+	if len(out) == 0 {
+		return []string{cmd}
+	}
+	return out
 }
 
 func writeRPCResult(w http.ResponseWriter, id json.RawMessage, result any) {

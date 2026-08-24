@@ -169,25 +169,27 @@ func cmdServe() error {
 	if *dev || *useTunnel || useNamedTunnel {
 		// All tunnel/dev modes bind on loopback; cloudflared (or the user) provides the public endpoint.
 		cfg.ListenAddr = "127.0.0.1"
+		listenLine := fmt.Sprintf("http://127.0.0.1:%d/mcp", cfg.ListenPort)
 		dashboardURL := fmt.Sprintf("http://127.0.0.1:%d/", cfg.ListenPort)
-		fmt.Println("⚠  DEV MODE — plain HTTP, no TLS. Do not expose this port externally.")
-		fmt.Printf("Axon %s listening on http://127.0.0.1:%d/mcp\n", version, cfg.ListenPort)
-		fmt.Printf("Dashboard: %s\n", dashboardURL)
-		fmt.Printf("API key:   %s\n\n", cfg.APIKey)
+
+		printBanner(version)
+		fmt.Printf("  %s  DEV MODE — plain HTTP, no TLS. Do not expose this port externally.\n\n", red+bold+"⚠"+reset)
+		printServerInfo(listenLine, dashboardURL, cfg.APIKey)
 
 		switch {
 		case useNamedTunnel:
 			mcpURL := *tunnelURL + "/mcp"
-			fmt.Printf("Named Cloudflare Tunnel: %s\n\n", *tunnelURL)
-			fmt.Println("Add to .cursor/mcp.json (permanent — update only when key changes):")
-			fmt.Println(server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey))
-			deep, err := server.CursorMCPInstallDeeplink("axon", mcpURL, cfg.APIKey)
-			if err == nil {
-				fmt.Println("\nCursor one-click install (contains API key — do not share):")
-				fmt.Println(deep)
-			}
-			fmt.Println()
-			fmt.Printf("Starting named tunnel %q…\n", *tunnelName)
+			fmt.Printf("  %s Named Cloudflare Tunnel: %s\n\n", bold+"☁"+reset, c(*tunnelURL))
+			printCursorSection(
+				server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey),
+				func() string {
+					dl, err := server.CursorMCPInstallDeeplink("axon", mcpURL, cfg.APIKey)
+					if err != nil { return "" }
+					return dl
+				}(),
+			)
+			printClaudeSection(mcpURL, cfg.APIKey, server.ClaudeCodeMCPConfig(mcpURL))
+			fmt.Printf("  Starting named tunnel %q…\n\n", *tunnelName)
 			go func() {
 				if err := tunnel.StartNamedTunnel(ctx, *tunnelName); err != nil && ctx.Err() == nil {
 					fmt.Fprintf(os.Stderr, "\ncloudflared error: %v\n", err)
@@ -196,19 +198,20 @@ func cmdServe() error {
 
 		case *useTunnel:
 			localURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.ListenPort)
-			fmt.Println("Starting Cloudflare quick tunnel… (this may take a few seconds)")
+			fmt.Printf("  Starting Cloudflare quick tunnel… %s\n\n", d("(this may take a few seconds)"))
 			go func() {
 				err := tunnel.StartTrycloudflare(ctx, localURL, func(publicURL string) {
 					mcpURL := publicURL + "/mcp"
-					fmt.Printf("\nCloudflare Tunnel ready: %s\n\n", publicURL)
-					fmt.Println("Add to .cursor/mcp.json:")
-					fmt.Println(server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey))
-					deep, err := server.CursorMCPInstallDeeplink("axon", mcpURL, cfg.APIKey)
-					if err == nil {
-						fmt.Println("\nCursor one-click install (contains API key — do not share):")
-						fmt.Println(deep)
-					}
-					fmt.Println()
+					fmt.Printf("\n  %s Cloudflare Tunnel ready: %s\n\n", bold+"☁"+reset, c(publicURL))
+					printCursorSection(
+						server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey),
+						func() string {
+							dl, e := server.CursorMCPInstallDeeplink("axon", mcpURL, cfg.APIKey)
+							if e != nil { return "" }
+							return dl
+						}(),
+					)
+					printClaudeSection(mcpURL, cfg.APIKey, server.ClaudeCodeMCPConfig(mcpURL))
 				})
 				if err != nil && ctx.Err() == nil {
 					fmt.Fprintf(os.Stderr, "\ncloudflared error: %v\n", err)
@@ -216,9 +219,12 @@ func cmdServe() error {
 			}()
 
 		default:
-			fmt.Println("Add to .cursor/mcp.json (dev — do not commit the key):")
-			fmt.Println(server.PrettyMCPDevConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey))
-			fmt.Println()
+			mcpURL := fmt.Sprintf("http://%s:%d/mcp", cfg.ListenAddr, cfg.ListenPort)
+			printCursorSection(
+				server.PrettyMCPDevConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey),
+				"",
+			)
+			printClaudeSection(mcpURL, cfg.APIKey, server.ClaudeCodeMCPConfig(mcpURL))
 		}
 
 		if !*noBrowser {
@@ -241,19 +247,22 @@ func cmdServe() error {
 	if host == "" || host == "0.0.0.0" {
 		host = "127.0.0.1"
 	}
+	mcpURL := server.MCPHTTPSURL(cfg.ListenAddr, cfg.ListenPort)
 	dashboardURL := fmt.Sprintf("https://%s:%d/", host, cfg.ListenPort)
-	fmt.Printf("Axon %s listening on https://%s:%d/mcp\n", version, cfg.ListenAddr, cfg.ListenPort)
-	fmt.Printf("Dashboard:     %s\n", dashboardURL)
-	fmt.Printf("TLS fingerprint (SHA-256 prefix): %s\n", fp)
-	fmt.Printf("API key: %s\n\n", cfg.APIKey)
-	fmt.Println("Add to Cursor .cursor/mcp.json:")
-	fmt.Println(server.PrettyMCPConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey))
-	deep, err := server.CursorMCPInstallDeeplink("axon", server.MCPHTTPSURL(cfg.ListenAddr, cfg.ListenPort), cfg.APIKey)
+	listenLine := fmt.Sprintf("https://%s:%d/mcp", cfg.ListenAddr, cfg.ListenPort)
+
+	printBanner(version)
+	printServerInfo(listenLine, dashboardURL, cfg.APIKey,
+		fmt.Sprintf("  %s %s", b("TLS fingerprint:"), d(fp)),
+	)
+
+	deep, err := server.CursorMCPInstallDeeplink("axon", mcpURL, cfg.APIKey)
+	deeplink := ""
 	if err == nil {
-		fmt.Println("Cursor one-click install (deeplink — contains API key; do not share):")
-		fmt.Println(deep)
-		fmt.Println()
+		deeplink = deep
 	}
+	printCursorSection(server.PrettyMCPConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey), deeplink)
+	printClaudeSection(mcpURL, cfg.APIKey, server.ClaudeCodeMCPConfig(mcpURL))
 
 	if !*noBrowser {
 		go openBrowser(dashboardURL)

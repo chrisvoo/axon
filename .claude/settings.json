@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "axon": {
+      "type": "http",
+      "url": "${AXON_MCP_URL}",
+      "headers": {
+        "Authorization": "Bearer ${AXON_MCP_TOKEN}"
+      }
+    }
+  }
+}

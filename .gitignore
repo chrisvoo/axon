@@ -16,3 +16,6 @@ web/dist/
 *.swp
 .idea/
 .vscode/
+
+# AI
+/.claude/settings.local.json

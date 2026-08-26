@@ -1,17 +1,17 @@
 # Axon
 
-Axon is a **standalone Go agent** that listens on **HTTPS** and exposes an [**MCP**](https://modelcontextprotocol.io) (Model Context Protocol) API so tools like **Cursor** can run shell commands and inspect files on a remote machine.
+Axon is a **standalone Go agent** that listens on **HTTPS** and exposes an [**MCP**](https://modelcontextprotocol.io) (Model Context Protocol) API so an AI coding agent can run shell commands and inspect files on a remote machine.
 
 ## Features
 
-- **TLS** with auto-generated self-signed certificate (or bring your own cert paths in config)
+- Uses Cloudflare as tunnel for exposing the remote machine to the coding agent
 - **API key** authentication (`Authorization: Bearer axon_k_...`)
 - **Optional IP allowlist** and **per-IP rate limiting**
 - **Command denylist** (default patterns for obviously dangerous commands)
 - **Read-only mode** (disable shell / writes / edits)
 - **Interactive commands**: detects stalled output and returns `input_required`; use **`send_input`** and **`cancel_command`**
 - **Audit log** (JSON lines) for tool invocations
-- Refuses to run as **root** on Unix
+- Refuses to run as **root** on Unix. When root permissions are required, a pop-up is shown so that the user can copy-paste the commands
 
 ## Install
 
@@ -38,7 +38,7 @@ Or build a permanent binary first:
 ```bash
 go build -o axon ./cmd/axon
 ./axon init
-./axon serve
+./axon serve 
 ```
 
 > **Linux firewall tip:** if you want Cursor on another machine to reach Axon, open the listen port first:
@@ -70,11 +70,11 @@ axon init    # TLS cert, API key, default denylist under ~/.axon/ (or %APPDATA%\
 axon serve   # listens on https://0.0.0.0:8443/mcp by default
 ```
 
-On the machine where Axon runs, **`axon serve`** prints the **API key**, **TLS fingerprint**, and a ready-to-paste MCP snippet. You reuse the same values in Cursor on your **operator** machine (often your Mac).
+On the machine where Axon runs, **`axon serve`** prints the **API key**, **TLS fingerprint**, and a ready-to-paste MCP snippet. You reuse the same values in the AI agent on your **operator** machine
 
-### Where Cursor reads MCP config
+### Where AI reads MCP config
 
-Cursor loads MCP server definitions from a JSON file. There are two common locations; **only one file is used per context**, and the exact precedence can vary by Cursor version—if in doubt, use **global** config while testing.
+AI loads MCP server definitions from a JSON file. There are two common locations; **only one file is used per context**, and the exact precedence can vary by Cursor version—if in doubt, use **global** config while testing.
 
 | Scope | Typical path (macOS) | When to use it |
 |--------|----------------------|----------------|

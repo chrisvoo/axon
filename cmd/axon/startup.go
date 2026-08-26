@@ -1,30 +1,41 @@
 package main
 
-import "fmt"
+import (
+	"fmt"
 
-// ANSI helpers — terminal colors, no external dependency.
-const (
-	reset  = "\033[0m"
-	bold   = "\033[1m"
-	dim    = "\033[2m"
-	cyan   = "\033[36m"
-	green  = "\033[32m"
-	yellow = "\033[33m"
-	blue   = "\033[34m"
-	red    = "\033[31m"
+	"github.com/charmbracelet/lipgloss"
 )
 
-func b(s string) string  { return bold + s + reset }
-func c(s string) string  { return cyan + s + reset }
-func g(s string) string  { return green + s + reset }
-func d(s string) string  { return dim + s + reset }
+// 1. Declare all styles globally.
+// This separates the UI design from your printing logic.
+var (
+	cyanStyle   = lipgloss.NewStyle().Foreground(lipgloss.Color("36"))
+	greenStyle  = lipgloss.NewStyle().Foreground(lipgloss.Color("32"))
+	yellowStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("33"))
+	dimStyle    = lipgloss.NewStyle().Faint(true)
+	boldStyle   = lipgloss.NewStyle().Bold(true)
+
+	// bannerStyle replaces the manual "╔════" string drawing.
+	bannerStyle = lipgloss.NewStyle().
+			Border(lipgloss.DoubleBorder()).
+			BorderForeground(lipgloss.Color("36")).
+			Padding(0, 1).
+			Margin(1, 0, 1, 2) // Replicates the 2-space left margin and empty lines.
+
+	// indentStyle replaces the splitLines function and manual "│" prefixing.
+	indentStyle = lipgloss.NewStyle().
+			Border(lipgloss.NormalBorder(), false, false, false, true). // Left border only
+			BorderForeground(lipgloss.Color("240")).                    // Dim grey border
+			PaddingLeft(2).
+			MarginLeft(2)
+)
 
 func printBanner(version string) {
-	fmt.Println()
-	fmt.Println(bold + cyan + "  ╔═══════════════════════════════════════╗" + reset)
-	fmt.Printf( bold+cyan+"  ║"+reset+"  "+bold+"Axon %-5s"+reset+"  — Secure Remote MCP Agent  "+bold+cyan+"║"+reset+"\n", version)
-	fmt.Println(bold + cyan + "  ╚═══════════════════════════════════════╝" + reset)
-	fmt.Println()
+	// Replicates the original layout: bold version, normal text for the rest.
+	leftText := boldStyle.Render(fmt.Sprintf("Axon %-5s", version))
+	rightText := "— Secure Remote MCP Agent"
+
+	fmt.Println(bannerStyle.Render(leftText + "  " + rightText))
 }
 
 // hyperlink emits an OSC 8 terminal hyperlink (iTerm2, Kitty, WezTerm, etc.).
@@ -35,9 +46,11 @@ func hyperlink(url, text string) string {
 
 func printServerInfo(listenLine, dashboardURL, apiKey string, extra ...string) {
 	dashWithKey := dashboardURL + "#" + apiKey
-	fmt.Printf("  %s  %s\n", b("Listening:"), c(listenLine))
-	fmt.Printf("  %s   %s\n", b("Dashboard:"), hyperlink(dashWithKey, cyan+dashWithKey+reset))
-	fmt.Printf("  %s    %s\n", b("API key:"), apiKey)
+
+	fmt.Printf("  %s  %s\n", boldStyle.Render("Listening:"), cyanStyle.Render(listenLine))
+	fmt.Printf("  %s   %s\n", boldStyle.Render("Dashboard:"), hyperlink(dashWithKey, cyanStyle.Render(dashWithKey)))
+	fmt.Printf("  %s    %s\n", boldStyle.Render("API key:"), greenStyle.Render(apiKey))
+
 	for _, line := range extra {
 		fmt.Println(line)
 	}
@@ -45,19 +58,25 @@ func printServerInfo(listenLine, dashboardURL, apiKey string, extra ...string) {
 }
 
 func printSectionHeader(title string) {
-	fmt.Println(bold + "  ── " + title + " " + dim + "────────────────────────────────────" + reset)
+	headerPrefix := boldStyle.Render("  ── " + title)
+	lineTrailing := dimStyle.Render(" ────────────────────────────────────")
+
+	fmt.Println(headerPrefix + lineTrailing)
 	fmt.Println()
 }
 
 // printCursorSection prints Cursor-specific MCP setup instructions.
 func printCursorSection(mcpJSON, deeplink string) {
 	printSectionHeader("Cursor")
-	fmt.Printf("  %s\n", d("Add to .cursor/mcp.json:"))
+
+	fmt.Printf("  %s\n", dimStyle.Render("Add to .cursor/mcp.json:"))
 	indentBlock(mcpJSON)
 	fmt.Println()
+
 	if deeplink != "" {
-		fmt.Printf("  %s\n", d("One-click install "+yellow+"(contains API key — do not share)"+reset+":"))
-		fmt.Printf("  %s\n", g(deeplink))
+		warning := yellowStyle.Render("(contains API key — do not share)")
+		fmt.Printf("  %s\n", dimStyle.Render("One-click install "+warning+":"))
+		fmt.Printf("  %s\n", greenStyle.Render(deeplink))
 		fmt.Println()
 	}
 }
@@ -67,40 +86,30 @@ func printCursorSection(mcpJSON, deeplink string) {
 func printClaudeSection(mcpURL, apiKey, settingsJSON string) {
 	printSectionHeader("Claude Code")
 
-	fmt.Printf("  %s\n", d("Set these environment variables (add to ~/.zshrc or ~/.bashrc):"))
-	fmt.Printf("  %s\n", green+`  export AXON_MCP_URL="`+cyan+mcpURL+reset+green+`"`+reset)
-	fmt.Printf("  %s\n", green+`  export AXON_MCP_TOKEN="`+cyan+apiKey+reset+green+`"`+reset)
+	fmt.Printf("  %s\n", dimStyle.Render("Set these environment variables (add to ~/.zshrc or ~/.bashrc):"))
+
+	urlLine := greenStyle.Render(`  export AXON_MCP_URL="`) + cyanStyle.Render(mcpURL) + greenStyle.Render(`"`)
+	tokenLine := greenStyle.Render(`  export AXON_MCP_TOKEN="`) + cyanStyle.Render(apiKey) + greenStyle.Render(`"`)
+
+	fmt.Println(urlLine)
+	fmt.Println(tokenLine)
 	fmt.Println()
 
-	fmt.Printf("  %s\n", d("Then add to .claude/settings.json in your project (key never hard-coded):"))
+	fmt.Printf("  %s\n", dimStyle.Render("Then add to .claude/settings.json in your project (key never hard-coded):"))
 	indentBlock(settingsJSON)
 	fmt.Println()
 
-	fmt.Printf("  %s\n", d("Or register via CLI (one-time):"))
-	fmt.Printf("  %s\n", green+`  claude mcp add axon --transport http "`+cyan+mcpURL+reset+green+`" \`+reset)
-	fmt.Printf("  %s\n", green+`    -H "Authorization: Bearer `+cyan+apiKey+reset+green+`"`+reset)
+	fmt.Printf("  %s\n", dimStyle.Render("Or register via CLI (one-time):"))
+
+	cliLine1 := greenStyle.Render(`  claude mcp add axon --transport http "`) + cyanStyle.Render(mcpURL) + greenStyle.Render(`" \`)
+	cliLine2 := greenStyle.Render(`    -H "Authorization: Bearer `) + cyanStyle.Render(apiKey) + greenStyle.Render(`"`)
+
+	fmt.Println(cliLine1)
+	fmt.Println(cliLine2)
 	fmt.Println()
 }
 
 func indentBlock(s string) {
-	fmt.Println(dim + "  ┌" + reset)
-	for _, line := range splitLines(s) {
-		fmt.Printf(dim+"  │"+reset+"  %s\n", line)
-	}
-	fmt.Println(dim + "  └" + reset)
-}
-
-func splitLines(s string) []string {
-	var out []string
-	start := 0
-	for i := 0; i < len(s); i++ {
-		if s[i] == '\n' {
-			out = append(out, s[start:i])
-			start = i + 1
-		}
-	}
-	if start < len(s) {
-		out = append(out, s[start:])
-	}
-	return out
+	// Lipgloss naturally handles the line splitting and left-border prefixing here.
+	fmt.Println(indentStyle.Render(s))
 }

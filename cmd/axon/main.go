@@ -12,6 +12,7 @@ import (
 	"runtime"
 	"syscall"
 
+	"github.com/charmbracelet/lipgloss"
 	"github.com/chrisvoo/axon/internal/audit"
 	"github.com/chrisvoo/axon/internal/config"
 	"github.com/chrisvoo/axon/internal/events"
@@ -23,6 +24,11 @@ import (
 )
 
 const version = "0.1.0"
+
+// Specific styles for main.go (reuses cyanStyle, dimStyle, boldStyle from startup.go)
+var (
+	alertStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("31")).Bold(true)
+)
 
 func main() {
 	if len(os.Args) < 2 {
@@ -173,18 +179,20 @@ func cmdServe() error {
 		dashboardURL := fmt.Sprintf("http://127.0.0.1:%d/", cfg.ListenPort)
 
 		printBanner(version)
-		fmt.Printf("  %s  DEV MODE — plain HTTP, no TLS. Do not expose this port externally.\n\n", red+bold+"⚠"+reset)
+		fmt.Printf("  %s  DEV MODE — plain HTTP, no TLS. Do not expose this port externally.\n\n", alertStyle.Render("⚠"))
 		printServerInfo(listenLine, dashboardURL, cfg.APIKey)
 
 		switch {
 		case useNamedTunnel:
 			mcpURL := *tunnelURL + "/mcp"
-			fmt.Printf("  %s Named Cloudflare Tunnel: %s\n\n", bold+"☁"+reset, c(*tunnelURL))
+			fmt.Printf("  %s Named Cloudflare Tunnel: %s\n\n", boldStyle.Render("☁"), cyanStyle.Render(*tunnelURL))
 			printCursorSection(
 				server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey),
 				func() string {
 					dl, err := server.CursorMCPInstallDeeplink("axon", mcpURL, cfg.APIKey)
-					if err != nil { return "" }
+					if err != nil {
+						return ""
+					}
 					return dl
 				}(),
 			)
@@ -198,16 +206,18 @@ func cmdServe() error {
 
 		case *useTunnel:
 			localURL := fmt.Sprintf("http://127.0.0.1:%d", cfg.ListenPort)
-			fmt.Printf("  Starting Cloudflare quick tunnel… %s\n\n", d("(this may take a few seconds)"))
+			fmt.Printf("  Starting Cloudflare quick tunnel… %s\n\n", dimStyle.Render("(this may take a few seconds)"))
 			go func() {
 				err := tunnel.StartTrycloudflare(ctx, localURL, func(publicURL string) {
 					mcpURL := publicURL + "/mcp"
-					fmt.Printf("\n  %s Cloudflare Tunnel ready: %s\n\n", bold+"☁"+reset, c(publicURL))
+					fmt.Printf("\n  %s Cloudflare Tunnel ready: %s\n\n", boldStyle.Render("☁"), cyanStyle.Render(publicURL))
 					printCursorSection(
 						server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey),
 						func() string {
 							dl, e := server.CursorMCPInstallDeeplink("axon", mcpURL, cfg.APIKey)
-							if e != nil { return "" }
+							if e != nil {
+								return ""
+							}
 							return dl
 						}(),
 					)
@@ -253,7 +263,7 @@ func cmdServe() error {
 
 	printBanner(version)
 	printServerInfo(listenLine, dashboardURL, cfg.APIKey,
-		fmt.Sprintf("  %s %s", b("TLS fingerprint:"), d(fp)),
+		fmt.Sprintf("  %s %s", boldStyle.Render("TLS fingerprint:"), dimStyle.Render(fp)),
 	)
 
 	deep, err := server.CursorMCPInstallDeeplink("axon", mcpURL, cfg.APIKey)

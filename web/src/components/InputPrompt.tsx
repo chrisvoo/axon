@@ -5,9 +5,11 @@ type Props = {
   processId: string
   apiKey: string
   hint?: string
+  /** When true, submit and cancel resolve locally without hitting the API (demo mode). */
+  mockApi?: boolean
 }
 
-export function InputPrompt({ processId, apiKey, hint }: Props) {
+export function InputPrompt({ processId, apiKey, hint, mockApi }: Props) {
   const [value, setValue] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -18,7 +20,9 @@ export function InputPrompt({ processId, apiKey, hint }: Props) {
     setBusy(true)
     setError(null)
     try {
-      await apiPostJson('/api/input', apiKey, { process_id: processId, data: value })
+      if (!mockApi) {
+        await apiPostJson('/api/input', apiKey, { process_id: processId, data: value })
+      }
       setValue('')
       setSent(true)
     } catch (err) {
@@ -32,7 +36,10 @@ export function InputPrompt({ processId, apiKey, hint }: Props) {
     setBusy(true)
     setError(null)
     try {
-      await apiPostJson('/api/cancel', apiKey, { process_id: processId })
+      if (!mockApi) {
+        await apiPostJson('/api/cancel', apiKey, { process_id: processId })
+      }
+      setSent(true)
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to cancel')
     } finally {

@@ -8,6 +8,9 @@ import { MCPConfigPanel } from './components/MCPConfigPanel'
 import { PrivilegedModal } from './components/PrivilegedModal'
 import { SessionStats } from './components/SessionStats'
 import { SystemStatus } from './components/SystemStatus'
+import { DemoPanel } from './demo/DemoPanel'
+
+const DEMO_MODE = import.meta.env.VITE_DEMO_MODE === 'true'
 
 function mergeRow(
   prev: ActivityRow | undefined,
@@ -98,6 +101,7 @@ function reduceActivity(rows: Map<string, ActivityRow>, event: AxonEvent): Map<s
 
 export default function App() {
   const [apiKey, setApiKey] = useState<string | null>(() => {
+    if (DEMO_MODE) return 'demo'
     const stored = sessionStorage.getItem(API_KEY_STORAGE)
     if (stored) return stored
     // Auto-connect when the dashboard URL contains #<api-key> (set by the server on startup)
@@ -158,7 +162,9 @@ export default function App() {
     setWsConnected(connected)
   }, [])
 
-  useAxonSocket(apiKey, { onEvent, onConnectionChange: onConnectionChange })
+  // In demo mode the WebSocket key is the sentinel 'demo', which will fail to
+  // authenticate. That's fine — we never want a real connection in demo mode.
+  useAxonSocket(DEMO_MODE ? null : apiKey, { onEvent, onConnectionChange: onConnectionChange })
 
   // Newest first: newer items appear at top of the list
   const sortedItems = useMemo(() => {
@@ -206,18 +212,23 @@ export default function App() {
         />
         <SystemStatus stats={systemStats} />
         <MCPConfigPanel apiKey={apiKey} />
-        <button
-          type="button"
-          onClick={handleDisconnect}
-          className="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
-        >
-          Change API key
-        </button>
+        {DEMO_MODE ? (
+          <DemoPanel onInject={onEvent} />
+        ) : (
+          <button
+            type="button"
+            onClick={handleDisconnect}
+            className="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
+          >
+            Change API key
+          </button>
+        )}
       </aside>
       <main className="flex min-h-0 flex-1 flex-col p-4">
         <ActivityLog
           items={sortedItems}
           apiKey={apiKey}
+          mockApi={DEMO_MODE}
           onClear={() => {
             setRows(new Map())
             setRequestCount(0)

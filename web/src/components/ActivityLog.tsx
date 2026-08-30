@@ -5,9 +5,10 @@ type Props = {
   items: ActivityRow[]
   apiKey: string
   onClear: () => void
+  mockApi?: boolean
 }
 
-export function ActivityLog({ items, apiKey, onClear }: Props) {
+export function ActivityLog({ items, apiKey, onClear, mockApi }: Props) {
   return (
     <section className="flex min-h-0 flex-1 flex-col rounded-2xl border border-zinc-800 bg-zinc-900/40">
       <header className="flex items-center justify-between border-b border-zinc-800 px-4 py-3">
@@ -24,7 +25,7 @@ export function ActivityLog({ items, apiKey, onClear }: Props) {
         {items.length === 0 ? (
           <p className="text-sm text-zinc-500">Waiting for tool calls from Cursor…</p>
         ) : (
-          items.map((row) => <ActivityItem key={row.callId} row={row} apiKey={apiKey} />)
+          items.map((row) => <ActivityItem key={row.callId} row={row} apiKey={apiKey} mockApi={mockApi} />)
         )}
       </div>
     </section>

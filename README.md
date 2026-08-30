@@ -291,7 +291,7 @@ Add to .cursor/mcp.json (permanent — update only when key changes):
 
 Add this snippet to `~/.cursor/mcp.json` on your Mac **once**. Because the URL is permanent, you never need to update it — even after restarting Axon on the Linux machine.
 
-## Local development (simulating remote assistance)
+## Local development (client and server on the same machine)
 
 During development you can run Axon on your own machine over **plain HTTP** — no TLS setup, no certificate trust required — and point Cursor at `localhost` as if it were a remote box.
 
@@ -325,6 +325,38 @@ Add to .cursor/mcp.json (dev — do not commit the key):
 Paste the snippet into `.cursor/mcp.json` (or `~/.cursor/mcp.json` for global use), reload Cursor, and all Axon tools appear under the `axon-dev` server entry.
 
 > **Security:** `-dev` is for local development only. The HTTP port has no transport encryption; never expose it outside `localhost`.
+
+### Dashboard UI demo mode (no server needed)
+
+The dashboard frontend can run entirely without a live Axon server or any network connection. This is useful for iterating on UI layout, parsing, and formatting without the overhead of initialising a server and triggering real tool calls.
+
+**How to start it:**
+
+```bash
+cd web
+VITE_DEMO_MODE=true pnpm dev
+```
+
+Open the URL Vite prints (usually `http://localhost:5173`). The dashboard loads directly into the activity view — no API-key prompt, no WebSocket connection attempt.
+
+**What changes in demo mode:**
+
+- The sidebar shows a **Demo mode** panel instead of the "Change API key" button.
+- A dropdown lets you choose a scenario; clicking **Inject event** fires that scenario's events through the same reducer that handles real WebSocket messages, with a 350 ms delay between steps so the state transitions are visible.
+- For `input_required` scenarios the `InputPrompt` dialog appears as normal, but submit and cancel resolve locally — no HTTP request is made.
+
+**Available scenarios** (chosen to exercise specific rendering paths):
+
+| Scenario | What it exercises |
+|---|---|
+| `shell_exec` — ANSI git log | ANSI color codes, bold, reset sequences in `ansi.ts` |
+| `shell_exec` — long output | Line-count truncation and the **Show more** button in `ActivityItem` |
+| `read_file` — JSON output | The `tryPrettyJson` path that reformats raw JSON before rendering |
+| `shell_exec` — error / non-zero exit | `is_error` badge, red status, non-zero `exit_code` display |
+| `shell_exec` — input\_required | `InputPrompt` dialog with hint text; submit/cancel are mocked |
+| `privileged_commands` modal | `PrivilegedModal` overlay with multiple command lines |
+
+**Architecture note:** demo mode is a pure frontend concern. `VITE_DEMO_MODE` is inlined at build time by Vite, so demo code is tree-shaken out of production bundles. The `DemoPanel` component (`web/src/demo/`) simply calls the same `onEvent` callback that real WebSocket messages use — no special paths exist in the event reducer or any other component.
 
 ## Commands
 

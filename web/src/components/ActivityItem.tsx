@@ -32,9 +32,9 @@ function AnsiPre({ text }: { text: string }) {
   )
 }
 
-type Props = { row: ActivityRow; apiKey: string }
+type Props = { row: ActivityRow; apiKey: string; mockApi?: boolean }
 
-export function ActivityItem({ row, apiKey }: Props) {
+export function ActivityItem({ row, apiKey, mockApi }: Props) {
   const [open, setOpen] = useState(true)
   const [expanded, setExpanded] = useState(false)
 
@@ -109,7 +109,7 @@ export function ActivityItem({ row, apiKey }: Props) {
             </div>
           )}
           {row.status === 'waiting_input' && row.processId && (
-            <InputPrompt processId={row.processId} apiKey={apiKey} hint={row.hint} />
+            <InputPrompt processId={row.processId} apiKey={apiKey} hint={row.hint} mockApi={mockApi} />
           )}
         </div>
       )}

@@ -29,9 +29,9 @@ tmp="/tmp/${name}"
 url="${BASE}/${name}"
 
 if command -v curl >/dev/null 2>&1; then
-  curl -fsSL "$url" -o "$tmp"
+  curl -fsSL "$url" -o "$tmp" || { echo "Download failed. No release found for your platform, or check: $url" >&2; exit 1; }
 elif command -v wget >/dev/null 2>&1; then
-  wget -q "$url" -O "$tmp"
+  wget -q "$url" -O "$tmp" || { echo "Download failed. No release found for your platform, or check: $url" >&2; exit 1; }
 else
   echo "need curl or wget" >&2
   exit 1

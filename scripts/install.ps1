@@ -7,7 +7,12 @@ $Url = "https://github.com/$Repo/releases/download/$Version/axon-windows-$Arch.z
 $Dest = Join-Path $env:LOCALAPPDATA "axon\bin"
 New-Item -ItemType Directory -Force -Path $Dest | Out-Null
 $Zip = Join-Path $env:TEMP "axon-windows-$Arch.zip"
-Invoke-WebRequest -Uri $Url -OutFile $Zip
+try {
+  Invoke-WebRequest -Uri $Url -OutFile $Zip
+} catch {
+  Write-Error "Download failed. No release found for your platform, or check: $Url"
+  exit 1
+}
 Expand-Archive -Path $Zip -DestinationPath $Dest -Force
 Remove-Item $Zip
 Write-Host "Installed axon.exe to $Dest"

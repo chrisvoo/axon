@@ -64,8 +64,8 @@ const TEST_FAILURE_OUTPUT = [
   'exit status 1',
 ].join('\n')
 
-// sudo-style interactive prompt to exercise input_required + InputPrompt dialog
-const SUDO_LAST_OUTPUT = '\x1b[1m[sudo]\x1b[0m password for ubuntu: '
+// Interactive prompt to exercise input_required + InputPrompt dialog
+const INTERACTIVE_LAST_OUTPUT = 'Target directory [/usr/local]: '
 
 export const SCENARIOS: Scenario[] = [
   {
@@ -168,14 +168,14 @@ export const SCENARIOS: Scenario[] = [
     },
   },
   {
-    label: 'shell_exec — input_required (sudo password)',
+    label: 'shell_exec — input_required (interactive prompt)',
     kind: 'input_required',
     build: () => {
       const callId = uid()
       return [
         {
           type: 'tool_called',
-          data: { call_id: callId, tool: 'shell_exec', detail: 'sudo apt-get upgrade -y', remote_ip: '127.0.0.1' },
+          data: { call_id: callId, tool: 'shell_exec', detail: 'bash setup.sh', remote_ip: '127.0.0.1' },
         },
         {
           type: 'input_required',
@@ -183,8 +183,8 @@ export const SCENARIOS: Scenario[] = [
             call_id: callId,
             tool: 'shell_exec',
             process_id: `demo-${callId}`,
-            last_output: SUDO_LAST_OUTPUT,
-            hint: 'sudo is asking for the system password to proceed with the upgrade',
+            last_output: INTERACTIVE_LAST_OUTPUT,
+            hint: 'The setup script is waiting for user input before continuing',
           },
         },
       ]

@@ -77,7 +77,7 @@ func (s *Server) handleInitialize(w http.ResponseWriter, req jsonRPCRequest) {
 
 func (s *Server) handleToolsList(w http.ResponseWriter, req jsonRPCRequest) {
 	toolList := []map[string]any{
-		toolDef("shell", "Run a shell command on the remote machine", map[string]any{
+		toolDef("shell", "Run a shell command on the remote machine. Commands that contain sudo are never executed automatically — they are forwarded to the remote user's dashboard for manual copy-paste and the tool returns {\"status\":\"requires_user_action\"}. When elevated privileges are needed, group all sudo lines into a single call. Non-sudo interactive commands that stall waiting for input return {\"status\":\"input_required\"} with a process_id; use send_input to continue or cancel_command to abort.", map[string]any{
 			"command": map[string]any{"type": "string", "description": "Command string"},
 		}),
 		toolDef("read_file", "Read a text file", map[string]any{

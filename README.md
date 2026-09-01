@@ -2,6 +2,30 @@
 
 Axon is a **standalone Go agent** that listens on **HTTPS** and exposes an [**MCP**](https://modelcontextprotocol.io) (Model Context Protocol) API so an AI coding agent can run shell commands and inspect files on a remote machine.
 
+- [Axon](#axon)
+  - [Features](#features)
+  - [Install](#install)
+    - [From source (module proxy — installs binary to `$GOPATH/bin`)](#from-source-module-proxy--installs-binary-to-gopathbin)
+    - [From a local clone (development / remote machine)](#from-a-local-clone-development--remote-machine)
+    - [Linux / macOS (script)](#linux--macos-script)
+    - [Windows (PowerShell)](#windows-powershell)
+  - [Quick start (remote machine)](#quick-start-remote-machine)
+    - [MCP config](#mcp-config)
+    - [Web dashboard](#web-dashboard)
+  - [Cloudflare Tunnel (public access without port forwarding)](#cloudflare-tunnel-public-access-without-port-forwarding)
+    - [Quick tunnel (no account needed — temporary URL)](#quick-tunnel-no-account-needed--temporary-url)
+    - [Named tunnel (permanent URL — recommended for regular use)](#named-tunnel-permanent-url--recommended-for-regular-use)
+      - [One-time setup (on the Linux machine)](#one-time-setup-on-the-linux-machine)
+      - [Running with the named tunnel](#running-with-the-named-tunnel)
+  - [Local development (client and server on the same machine)](#local-development-client-and-server-on-the-same-machine)
+    - [Dashboard UI demo mode (no server needed)](#dashboard-ui-demo-mode-no-server-needed)
+  - [Commands](#commands)
+  - [Configuration](#configuration)
+  - [MCP tools](#mcp-tools)
+  - [Security notes](#security-notes)
+  - [License](#license)
+
+
 ## Features
 
 - Uses Cloudflare as tunnel for exposing the remote machine to the coding agent
@@ -314,6 +338,8 @@ Notable options:
 | `system_info`    | Host, CPU, memory, disk summary |
 | `send_input`     | Send data to stdin of a process that returned `input_required` |
 | `cancel_command` | Kill a tracked process |
+
+> **Privileged commands (`sudo`):** when the agent calls `shell` with a command containing `sudo`, Axon never executes it. Instead it emits a `privileged_commands` dashboard event, and the tool returns `{"status":"requires_user_action"}`. The remote user sees a copy-paste dialog in the dashboard and runs the command themselves.
 
 ## Security notes
 

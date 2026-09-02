@@ -23,7 +23,7 @@ export function ActivityLog({ items, apiKey, onClear, mockApi }: Props) {
       </header>
       <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-x-hidden overflow-y-auto p-4">
         {items.length === 0 ? (
-          <p className="text-sm text-zinc-500">Waiting for tool calls from Cursor…</p>
+          <p className="text-sm text-zinc-500">Waiting for tool calls from the AI agent</p>
         ) : (
           items.map((row) => <ActivityItem key={row.callId} row={row} apiKey={apiKey} mockApi={mockApi} />)
         )}

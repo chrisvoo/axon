@@ -63,7 +63,7 @@ func (s *Server) HandleJSONRPC(ctx context.Context, w http.ResponseWriter, r *ht
 
 func (s *Server) handleInitialize(w http.ResponseWriter, req jsonRPCRequest) {
 	res := map[string]any{
-		"protocolVersion": "2024-11-05",
+		"protocolVersion": "2025-03-26",
 		"capabilities": map[string]any{
 			"tools": map[string]any{},
 		},

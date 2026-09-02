@@ -238,7 +238,7 @@ func cmdServe() error {
 		}
 
 		if !*noBrowser {
-			go openBrowser(dashboardURL)
+			go openBrowser(dashboardURL + "#" + cfg.APIKey)
 		}
 
 		return server.Run(ctx, cfg, deny, log, server.Options{
@@ -275,7 +275,7 @@ func cmdServe() error {
 	printClaudeSection(mcpURL, cfg.APIKey, server.ClaudeCodeMCPConfig(mcpURL))
 
 	if !*noBrowser {
-		go openBrowser(dashboardURL)
+		go openBrowser(dashboardURL + "#" + cfg.APIKey)
 	}
 
 	return server.Run(ctx, cfg, deny, log, server.Options{

@@ -112,6 +112,19 @@ Share the MCP configuration on the machine where your coding agent runs. Replace
 }
 ```
 
+#### Claude Code
+
+Register Axon with a single command (replace URL and key with your values from `axon serve`):
+
+```bash
+claude mcp add axon --transport http "https://YOUR_REMOTE_HOST:8443/mcp" \
+  -H "Authorization: Bearer axon_k_..."
+```
+
+Restart Claude Code and the Axon tools will appear.
+
+#### Cursor
+
 Alternatively, in case you use Cursor, it supports registering an MCP server from a **`cursor://`** URL. The authoritative format, examples, and an **online helper to generate links** (Base64-encode the config for you) are here:
 
 **[Cursor — MCP install links](https://cursor.com/docs/context/mcp/install-links)**

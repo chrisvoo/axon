@@ -18,4 +18,5 @@ web/dist/
 .vscode/
 
 # AI
+/.claude/settings.json
 /.claude/settings.local.json

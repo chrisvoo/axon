@@ -29,43 +29,9 @@ This document shows the parts of Axon, the actors, and how data moves between th
 
 ## System overview
 
-```mermaid
-flowchart TB
-    agent["AI agent<br/>Claude Code, Cursor"]
-    operator["Operator<br/>Browser dashboard"]
-    transport["HTTPS<br/>Cloudflare tunnel or direct TLS"]
+![Axon architecture. The AI agent and the operator reach Axon over HTTPS. Both pass the IP allowlist and the rate limit. The agent then passes the API key check and the MCP handler, the policy and the tools. The operator passes the operator key check and the operator routes, which feed the secret store. Audit and event data flow to the dashboard.](assets/axon-architecture.png)
 
-    subgraph axon["Axon (Go) on the remote machine"]
-        http["HTTP server and guards<br/>Allowlist, rate limit, keys"]
-        mcp["MCP handler<br/>JSON-RPC 2.0 dispatch"]
-        policy["Policy<br/>sudo, denylist, read-only"]
-        tools["Tools<br/>shell, files, grep, glob"]
-        audit["Audit log<br/>JSON lines"]
-        bus["Event bus<br/>In-process pub/sub"]
-        hub["WebSocket hub<br/>Fan-out to dashboards"]
-    end
-
-    os["Host OS<br/>pty shell, files, stats"]
-    remote["Remote user<br/>Runs sudo commands"]
-
-    agent <-->|"JSON-RPC + API key"| transport
-    operator <-->|"HTTP + WebSocket"| transport
-    transport <--> http
-    http --> mcp --> policy --> tools --> os
-    mcp --> audit
-    mcp --> bus --> hub
-    hub -->|"events"| operator
-    remote -.->|"by hand"| os
-
-    classDef req fill:#E1F5EE,stroke:#0F6E56,color:#04342C
-    classDef evt fill:#FAEEDA,stroke:#854F0B,color:#412402
-    classDef ext fill:#F1EFE8,stroke:#5F5E5A,color:#2C2C2A
-    class http,mcp,policy,tools req
-    class audit,bus,hub evt
-    class agent,operator,transport,os,remote ext
-```
-
-Green boxes are the request path. Amber boxes are the event and audit path. Gray boxes are actors, transport and the host.
+Green boxes are the agent request path. Blue boxes are the operator path. The rose box is the secret store, which hides operator input from the agent. Amber boxes are the event and audit path. Gray boxes are actors, config and the host. The editable source is [assets/axon-architecture.svg](assets/axon-architecture.svg).
 
 ### What the diagram shows
 
@@ -77,7 +43,7 @@ Green boxes are the request path. Amber boxes are the event and audit path. Gray
 4. The MCP handler reads the method: `initialize`, `tools/list` or `tools/call`.
 5. For `shell`, the policy checks run in this order:
    - A command that contains `sudo` never runs. It goes to the dashboard.
-   - In read-only mode, the shell is disabled.
+   - In read-only mode, the shell is disabled. `write_file` and `edit_file` are disabled too.
    - A command that contains a denylist pattern is blocked.
 6. The tool runs on the host: a pty shell, a file read or write, `grep`, `glob`, or a host stats query.
 7. The result returns to the agent in the same HTTP response.
@@ -158,7 +124,7 @@ The operator can type a password in the dashboard when a command waits for input
    - the output of every `shell` call, also of other commands that run later
    - the `send_input` result and the stored final result
    - the result of `read_file`, `grep` and `glob`, and error messages
-   - the details in dashboard events
+   - the `detail` of `tool_called` events and the output preview of `tool_result` events
    - the audit log
 5. The store also replaces the JSON-escaped form of the text. Output is often encoded after it is built. A quote or a backslash in a password looks different once encoded.
 6. The audit log records only the process id for the operator's input. The `dashboard_input` event carries the process id, the IP address and the `secret` flag. Neither carries the text.
@@ -191,5 +157,6 @@ Limits. The protection is best effort:
 - There are two credentials. The API key runs any command that the Axon user can run. The operator key controls the dashboard: it answers prompts, registers secrets, cancels commands and reads the API key. Keep the operator key away from the agent. The config file holds only a SHA-256 hash of the operator key, because the agent can read that file. A hash does not work as a key. The agent can overwrite the hash, and the change applies at the next start.
 - The denylist and the `sudo` check are guardrails. A client can bypass them. Run Axon as an unprivileged user without passwordless `sudo`.
 - In tunnel modes, every request comes from `127.0.0.1`. The IP allowlist and the per-IP rate limit cannot tell clients apart.
+- The WebSocket accepts any `Origin`. The operator key in the `?key=` query is the only check. A proxy in front of Axon, such as Cloudflare, can see that URL.
 
 See [Security notes](README.md#security-notes) for the full list.

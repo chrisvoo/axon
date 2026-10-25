@@ -36,16 +36,17 @@ func TestCursorMCPInstallDeeplink(t *testing.T) {
 	if err := json.Unmarshal(raw, &payload); err != nil {
 		t.Fatal(err)
 	}
-	axon, ok := payload["axon"].(map[string]any)
-	if !ok {
-		t.Fatalf("payload axon: %#v", payload["axon"])
+	// Cursor uses the `name` param as the mcpServers key, so the payload is the
+	// transport object itself. Wrapping it in the server name double-nests it.
+	if _, wrapped := payload["axon"]; wrapped {
+		t.Fatalf("payload must not be wrapped in the server name: %#v", payload)
 	}
-	if axon["url"] != "https://127.0.0.1:8443/mcp" {
-		t.Fatalf("url: %#v", axon["url"])
+	if payload["url"] != "https://127.0.0.1:8443/mcp" {
+		t.Fatalf("url: %#v", payload["url"])
 	}
-	h, ok := axon["headers"].(map[string]any)
+	h, ok := payload["headers"].(map[string]any)
 	if !ok {
-		t.Fatalf("headers: %#v", axon["headers"])
+		t.Fatalf("headers: %#v", payload["headers"])
 	}
 	if h["Authorization"] != "Bearer axon_k_test" {
 		t.Fatalf("Authorization: %#v", h["Authorization"])

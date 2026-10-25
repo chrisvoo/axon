@@ -36,7 +36,7 @@ flowchart TB
     transport["HTTPS<br/>Cloudflare tunnel or direct TLS"]
 
     subgraph axon["Axon (Go) on the remote machine"]
-        http["HTTP server and guards<br/>Allowlist, rate limit, API key"]
+        http["HTTP server and guards<br/>Allowlist, rate limit, keys"]
         mcp["MCP handler<br/>JSON-RPC 2.0 dispatch"]
         policy["Policy<br/>sudo, denylist, read-only"]
         tools["Tools<br/>shell, files, grep, glob"]

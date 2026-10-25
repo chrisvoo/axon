@@ -1,6 +1,6 @@
 # Security review
 
-Date: 2026-10-25. Scope: the whole repository at the working tree state after the secret-redaction change. This includes the Go server, the React dashboard, the build and release files, and the install scripts.
+Date: 2026-10-25. Scope: the whole repository at commit `7ecf0b1` (after the secret store, the two keys and the operator key hash). This includes the Go server, the React dashboard, the build and release files, and the install scripts.
 
 ## Summary
 
@@ -31,7 +31,7 @@ Not run: `govulncheck` (not installed), the Windows code at run time, and Linux-
 |---|---|
 | Assets | The host account, the API key, secrets typed by the operator, the audit trail |
 | Actors | AI agent (semi-trusted), operator, remote user, network attacker, Cloudflare |
-| Trust boundary | The API key. After it, the caller can do anything the Axon user can do. |
+| Trust boundary | The API key (the agent) and the operator key (the dashboard). With the API key, the caller can do anything the Axon user can do. The operator key adds control of the dashboard and the secret store. |
 | Out of scope | A compromised host, a malicious Axon user, a malicious `cloudflared` binary |
 
 ## 2. Findings
@@ -113,13 +113,12 @@ Three reviews found five weaknesses in the first versions. All are fixed and tes
 
 How it works: one secret store on the process manager. It holds each typed line and its JSON-escaped form. A secret lasts as long as its process, then 10 minutes. The text is registered before it is written to the pty. The server treats a missing `secret` flag as `true`.
 
-Why the store is shared: a review of the first version found that a store for each process missed a program that writes the text to a file. The agent could then read the file with `cat` or `read_file`. A test now covers this case.
-
 Limits. The protection is best effort:
 
 - **Exact text only.** A changed copy is not replaced: a hash, base64, or a terminal that redraws the line with control codes.
+- **The operator can hide words.** Whoever holds the operator key can register a secret for a live process. Axon then shows that text as `[redacted]` in the audit log too. This is by design: it is how a password stays out of the log. It means the audit log is not a complete record against someone who holds the operator key.
 - **Over-redaction.** The store replaces the text in all output. A short secret such as `root` also replaces ordinary words. The operator chooses this with the `Secret` box.
-- **Time limit.** The text is no longer replaced 10 minutes after its process ends.
+- **Time limit.** The text is no longer replaced 10 minutes after its process ends (a long command keeps its secret for its whole run).
 - **Same-user access.** A hostile agent runs as the Axon user. It can try `ptrace`, `/proc` or other tools on the target process. On Linux, keep `kernel.yama.ptrace_scope` at 1 or higher and run Axon as a dedicated user. I did not test this on Linux.
 - **Tunnel.** Cloudflare ends the TLS connection. The browser's request, with the password, passes through its network.
 - **Plain responses.** With the `Secret` box off, the agent sees the text on purpose.

@@ -5,7 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# First-time setup (generates API key, operator key, TLS cert, denylist in ~/.axon/)
+# First-time setup (generates API key, operator key, TLS cert, denylist in ~/.axon/).
+# It shows the operator key once. The config keeps only a hash.
 ./axon init
 
 # Build (compiles web dashboard, then Go binary)
@@ -38,7 +39,7 @@ Axon is a **remote MCP (Model Context Protocol) server** that exposes the remote
 ```
 AI client (Claude / Cursor)
   → POST /mcp (Bearer API key). The dashboard uses the operator key on /ws and /api/*.
-  → internal/server — IP allowlist, rate limit, then API-key check in each handler
+  → internal/server — IP allowlist, rate limit, then the key check of the route (requireKey)
   → internal/mcp — JSON-RPC 2.0 dispatch (handleToolsCall)
   → internal/tools — shell / file / search execution
   → events.Bus.Publish() → Hub → WebSocket broadcast → React dashboard
@@ -51,11 +52,11 @@ AI client (Claude / Cursor)
 | `cmd/axon` | CLI entry point: `init`, `serve`, `status`, `keygen`; terminal banner in `startup.go` |
 | `internal/mcp` | JSON-RPC 2.0 handler; all tool dispatch lives in `handleToolsCall` |
 | `internal/tools` | Tool implementations: shell, read/write/edit file, grep, glob, system_info, send_input, cancel_command |
-| `internal/server` | HTTP(S) server, routes (`/mcp`, `/ws`, `/api/cancel`, `/api/input`), and the MCP client-config snippet builders used by `cmd/axon` |
+| `internal/server` | HTTP(S) server, routes (`/mcp`, `/ws`, `/api/cancel`, `/api/input`, `/api/agent-config`), and the MCP client-config snippet builders used by `cmd/axon` |
 | `internal/hub` | WebSocket fan-out; subscribes to `events.Bus` and pushes to all dashboard clients |
 | `internal/events` | Simple pub/sub bus (buffered channels, drops on full) |
 | `internal/security` | Bearer-token check, denylist, rate limiter, TLS, IP allowlist |
-| `internal/config` | YAML config loader/saver; embeds the default config and denylist; paths from `internal/paths` |
+| `internal/config` | YAML config loader/saver; embeds the default config and denylist; key rules (`HashKey`, `OperatorKeyMatches`, `Validate`); paths from `internal/paths` |
 | `internal/audit` | JSON-lines audit log of tool calls |
 | `internal/tunnel` | Cloudflare tunnel integration (`trycloudflare` quick tunnel or named tunnel) |
 | `internal/dashboard` | Embeds the built dashboard (`dist/`) |
@@ -66,7 +67,7 @@ AI client (Claude / Cursor)
 
 - **`sudo` detection**: `isPrivilegedCmd` in `mcp.go` does a word-boundary scan for `sudo`. Matching commands are never executed — they are published as `privileged_commands` events to the dashboard for manual copy-paste. The tool returns `{"status":"requires_user_action"}`. This is a guardrail, not a security boundary: `/usr/bin/sudo` or a script that calls `sudo` is not detected.
 - **Interactive stall**: non-sudo commands that produce no output for `InputStallSec` (default 5 s) return `{"status":"input_required", "process_id":"..."}`. The caller must use `send_input` or `cancel_command` to continue. The command outlives the HTTP request and ends at `shell_timeout`. When it ends, `ProcManager.Finish` keeps its final result for 2 minutes, so `send_input` (empty data) still returns the output and exit code if the operator answered in the dashboard.
-- **Operator secrets**: the dashboard sends `POST /api/input` with `secret` (default true). `tools.SendOperatorInput` registers each typed line in the `ProcManager` secret store (`AddSecret`, 10 minutes, with its JSON-escaped form) before it writes to the pty. The store is shared by all processes. Anything the agent or the dashboard can read must pass `ProcManager.Redact`: shell results (`RunShell`), `send_input` and finished results, and the final `text` of every tool call in `mcp.handleToolsCall` (also errors and event details). The audit logger redacts `Detail` through `SetRedactor`. Never return `TrackedProc.snapshot()` or `OutBuf` directly. Events and audit lines never contain the input text. Redaction is best effort: exact text only.
+- **Operator secrets**: the dashboard sends `POST /api/input` with `secret` (default true). `tools.SendOperatorInput` registers each typed line in the `ProcManager` secret store (`AddSecret`, with its JSON-escaped form) before it writes to the pty. `AddSecret` needs a live process: an empty, unknown or ended process registers nothing. A secret lasts as long as its process, then 10 minutes (`releaseSecretsLocked`). The store is shared by all processes. Anything the agent or the dashboard can read must pass `ProcManager.Redact`: shell results (`RunShell`), `send_input` and finished results, and the final `text` of every tool call in `mcp.handleToolsCall` (also errors and event details). The audit logger redacts `Detail` through `SetRedactor`. Never return `TrackedProc.snapshot()` or `OutBuf` directly. Events and audit lines never contain the input text. Redaction is best effort: exact text only.
 - **Read-only mode**: if `cfg.ReadOnly` is true, `shell`, `write_file` and `edit_file` are disabled.
 - **Denylist**: `~/.axon/denylist.txt` is loaded at startup (`axon init` writes it from the embedded `internal/config/denylist.txt`). Commands that contain any pattern as a substring are blocked. A missing file means an empty denylist.
 

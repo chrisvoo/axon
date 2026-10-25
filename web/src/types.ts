@@ -32,4 +32,5 @@ export type ActivityRow = {
   createdAt: number
 }
 
-export const API_KEY_STORAGE = 'axon_api_key'
+// The dashboard holds the operator key. The agent's API key is a different key.
+export const API_KEY_STORAGE = 'axon_operator_key'

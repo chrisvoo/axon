@@ -104,7 +104,7 @@ func (s *Server) handleToolsList(w http.ResponseWriter, req jsonRPCRequest) {
 			"pattern": map[string]any{"type": "string"},
 		}),
 		toolDef("system_info", "Host, CPU, memory, disk summary", map[string]any{}),
-		toolDef("send_input", "Send stdin to a process waiting for input", map[string]any{
+		toolDef("send_input", "Send stdin to a process waiting for input. If the process already ended (for example the operator answered in the dashboard), returns its final result: status, output and exit code. Call with empty data to read it. The result stays available for 2 minutes.", map[string]any{
 			"process_id": map[string]any{"type": "string"},
 			"data":       map[string]any{"type": "string"},
 		}),
@@ -182,7 +182,7 @@ func (s *Server) handleToolsCall(ctx context.Context, w http.ResponseWriter, req
 
 	callID := newCallID()
 	started := time.Now()
-	detail := toolDetail(params.Name, params.Arguments)
+	detail := s.Procs.Redact(toolDetail(params.Name, params.Arguments))
 	s.publish(events.Event{
 		Type: "tool_called",
 		Data: map[string]any{
@@ -301,9 +301,12 @@ func (s *Server) handleToolsCall(ctx context.Context, w http.ResponseWriter, req
 		return
 	}
 
+	// Everything the agent and the dashboard can read passes the secret store.
+	text = s.Procs.Redact(text)
 	durationMs := time.Since(started).Milliseconds()
 	ok := err == nil
 	if err != nil {
+		errText := s.Procs.Redact(err.Error())
 		s.publish(events.Event{
 			Type: "tool_result",
 			Data: map[string]any{
@@ -313,11 +316,11 @@ func (s *Server) handleToolsCall(ctx context.Context, w http.ResponseWriter, req
 				"duration_ms":  durationMs,
 				"ok":           false,
 				"is_error":     true,
-				"output_preview": previewText(err.Error(), 4000),
+				"output_preview": previewText(errText, 4000),
 			},
 		})
 		writeRPCResult(w, req.ID, map[string]any{
-			"content": []map[string]any{{"type": "text", "text": fmt.Sprintf("error: %v", err)}},
+			"content": []map[string]any{{"type": "text", "text": "error: " + errText}},
 			"isError": true,
 		})
 		return

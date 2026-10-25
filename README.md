@@ -17,10 +17,11 @@ Axon is a standalone Go agent. It exposes an [MCP](https://modelcontextprotocol.
 
 ## Features
 
-- API key authentication (`Authorization: Bearer axon_k_...`)
+- Two keys: the agent's API key opens `/mcp` (`Authorization: Bearer axon_k_...`). A separate operator key opens the dashboard (`axon_o_...`). The agent does not have the operator key. Axon stores only a hash of the operator key, so the agent cannot read it from the config file.
 - Optional IP allowlist and per-IP rate limiting
 - Command denylist and read-only mode
 - Interactive commands: a command that waits for input returns `input_required`. Use `send_input` or `cancel_command` to continue.
+- Secret input: a password that you type in the dashboard goes to the command. Axon replaces that text with `[redacted]` in everything the agent can read, in the dashboard and in the logs. This is best effort. See [Security notes](#security-notes).
 - Audit log (JSON lines) for every tool call
 - Web dashboard with a live view of agent activity
 - Refuses to run as root. Commands that contain `sudo` never run. The dashboard shows them so that you can run them yourself.
@@ -56,11 +57,15 @@ make build                    # also rebuilds the dashboard (needs pnpm)
 On the remote machine:
 
 ```bash
-axon init    # creates ~/.axon/ with the API key, TLS certificate and denylist
+axon init    # creates ~/.axon/ with the keys, TLS certificate and denylist. Shows the operator key once.
 axon serve   # listens on https://0.0.0.0:8443/mcp
 ```
 
-`axon serve` prints the API key, the TLS fingerprint and ready-to-paste client configuration. It also opens the dashboard in your browser. Use `-no-browser` to skip this.
+**Save the operator key when `axon init` shows it.** Axon keeps only a hash and cannot show the key again. Use a password manager. `axon keygen -operator` makes a new one.
+
+`axon serve` prints the API key (for the agent), the TLS fingerprint and ready-to-paste client configuration. It also opens the dashboard in your browser. The address has no key: paste the operator key into the page. Use `-no-browser` to skip opening the browser.
+
+If you upgrade from a version with one key, run `axon init` once. It makes the operator key, shows it once, and keeps the rest.
 
 > **TLS:** the generated certificate is self-signed and valid only for `localhost` and `127.0.0.1`. A remote client cannot verify it. Use a [Cloudflare tunnel](#cloudflare-tunnel), or set `cert_file` and `key_file` to your own certificate.
 
@@ -94,7 +99,7 @@ Restart the agent after you change its MCP configuration.
 
 ## Dashboard
 
-The dashboard is at the origin of the server, for example `https://YOUR_REMOTE_HOST:8443/` (not `/mcp`). Enter the same API key to connect. With the self-signed certificate, accept the browser warning first.
+The dashboard is at the origin of the server, for example `https://YOUR_REMOTE_HOST:8443/` (not `/mcp`). Enter the operator key to connect (`axon init` showed it once). Do not give the operator key to the agent. With the self-signed certificate, accept the browser warning first.
 
 The dashboard lists the commands from the agent, newest first. If a command needs `sudo`, a dialog shows the command for you to copy and run.
 
@@ -156,7 +161,7 @@ cd web && VITE_DEMO_MODE=true pnpm dev
 
 | Command | Description |
 |---|---|
-| `axon init` | Create the config, API key, TLS certificate and denylist |
+| `axon init` | Create the config, API key, operator key (shown once), TLS certificate and denylist |
 | `axon serve` | Start the HTTPS MCP server |
 | `axon serve -dev` | Plain HTTP on `127.0.0.1`, for local development |
 | `axon serve -tunnel` | Start a Cloudflare quick tunnel (implies `-dev`) |
@@ -164,7 +169,8 @@ cd web && VITE_DEMO_MODE=true pnpm dev
 | `axon serve -addr A -port P` | Override the listen address and port |
 | `axon serve -no-browser` | Do not open the dashboard |
 | `axon status` | Show the config paths and the certificate fingerprint |
-| `axon keygen` | Rotate the API key |
+| `axon keygen` | Rotate the API key (restart `axon serve` to apply it) |
+| `axon keygen -operator` | Make a new operator key and show it once (restart `axon serve` to apply it) |
 | `axon version` | Print the version |
 
 ## Configuration
@@ -199,9 +205,11 @@ Axon merges `~/.axon/config.yaml` over the built-in defaults.
 
 ## Security notes
 
-- Treat the API key like a password. Rotate it with `axon keygen` if it leaks.
+- Treat both keys like passwords. Rotate them with `axon keygen` and `axon keygen -operator` if they leak.
+- Keep the operator key away from the agent. Only the operator key registers secrets, answers prompts in the dashboard and reads the agent's key. The API key reaches `/mcp` only. The config file holds a hash of the operator key, which the agent cannot use. The agent can still overwrite that hash, and the change applies at the next start. Run Axon as a dedicated user and keep the config out of the agent's reach.
 - Run Axon as an unprivileged user that has no passwordless `sudo`. The denylist and the `sudo` check are guardrails, not a sandbox. A client can bypass them, for example with `/usr/bin/sudo` or by writing a script and running it.
 - The file tools can reach every path that the Axon user can reach.
+- Secret input is hidden by exact-text replacement, while its command runs and for 10 minutes after, in the output of every tool (shell, files, search), the logs and the dashboard. It does not hide a changed copy of the secret (for example a hash). It does not stop a hostile agent that runs commands as the Axon user. In tunnel mode, Cloudflare handles the traffic between your browser and Axon, so a secret passes through its network.
 - In tunnel mode, every request comes from `127.0.0.1`. `ip_allowlist` and the per-IP rate limit cannot tell clients apart.
 - Prefer a VPN or an SSH tunnel if you cannot expose a port safely.
 - Review and extend `~/.axon/denylist.txt` for your environment.

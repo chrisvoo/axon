@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useAgentKey } from './hooks/useAgentKey'
 import { useAxonSocket } from './hooks/useAxonSocket'
 import type { ActivityRow, ActivityStatus, AxonEvent } from './types'
 import { API_KEY_STORAGE } from './types'
@@ -28,7 +29,7 @@ function mergeRow(
   return { ...base, ...patch, callId: patch.callId }
 }
 
-function reduceActivity(rows: Map<string, ActivityRow>, event: AxonEvent): Map<string, ActivityRow> {
+export function reduceActivity(rows: Map<string, ActivityRow>, event: AxonEvent): Map<string, ActivityRow> {
   const next = new Map(rows)
   const d = event.data ?? {}
 
@@ -58,7 +59,10 @@ function reduceActivity(rows: Map<string, ActivityRow>, event: AxonEvent): Map<s
       }
       const prev = next.get(callId)
       const ok = d.ok !== false && d.is_error !== true
-      const status: ActivityStatus = ok ? 'done' : 'error'
+      // The server publishes input_required before tool_result for the same call.
+      // A command that waits for input is not done, and the prompt must stay visible.
+      const waiting = ok && d.shell_status === 'input_required'
+      const status: ActivityStatus = !ok ? 'error' : waiting ? 'waiting_input' : 'done'
       next.set(
         callId,
         mergeRow(prev, {
@@ -100,6 +104,7 @@ function reduceActivity(rows: Map<string, ActivityRow>, event: AxonEvent): Map<s
 }
 
 export default function App() {
+  // The operator key opens the dashboard routes. It is not the agent's API key.
   const [apiKey, setApiKey] = useState<string | null>(() => {
     if (DEMO_MODE) return 'demo'
     const stored = sessionStorage.getItem(API_KEY_STORAGE)
@@ -166,6 +171,14 @@ export default function App() {
   // authenticate. That's fine — we never want a real connection in demo mode.
   useAxonSocket(DEMO_MODE ? null : apiKey, { onEvent, onConnectionChange: onConnectionChange })
 
+  const handleDisconnect = useCallback(() => {
+    sessionStorage.removeItem(API_KEY_STORAGE)
+    setApiKey(null)
+  }, [])
+
+  const loadedAgentKey = useAgentKey(DEMO_MODE ? null : apiKey, handleDisconnect)
+  const agentKey = DEMO_MODE ? 'axon_k_demo' : loadedAgentKey
+
   // Newest first: newer items appear at top of the list
   const sortedItems = useMemo(() => {
     return [...rows.values()].sort((a, b) => b.createdAt - a.createdAt)
@@ -179,11 +192,6 @@ export default function App() {
     setErrorCount(0)
     setConnectedAt(null)
     setAgentVersion(undefined)
-  }
-
-  const handleDisconnect = () => {
-    sessionStorage.removeItem(API_KEY_STORAGE)
-    setApiKey(null)
   }
 
   if (!apiKey) {
@@ -211,7 +219,7 @@ export default function App() {
           since={connectedAt}
         />
         <SystemStatus stats={systemStats} />
-        <MCPConfigPanel apiKey={apiKey} />
+        <MCPConfigPanel apiKey={agentKey ?? 'YOUR_API_KEY'} />
         {DEMO_MODE ? (
           <DemoPanel onInject={onEvent} />
         ) : (
@@ -220,7 +228,7 @@ export default function App() {
             onClick={handleDisconnect}
             className="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
           >
-            Change API key
+            Change operator key
           </button>
         )}
       </aside>

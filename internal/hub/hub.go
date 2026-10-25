@@ -8,17 +8,16 @@ import (
 	"time"
 
 	"github.com/chrisvoo/axon/internal/events"
-	"github.com/chrisvoo/axon/internal/security"
 	"github.com/chrisvoo/axon/internal/tools"
 	"github.com/gorilla/websocket"
 )
 
 // Hub fans out bus events to WebSocket clients and pushes periodic system stats.
 type Hub struct {
-	bus     *events.Bus
-	version string
-	mu      sync.Mutex
-	clients map[*websocket.Conn]struct{}
+	bus      *events.Bus
+	version  string
+	mu       sync.Mutex
+	clients  map[*websocket.Conn]struct{}
 	upgrader websocket.Upgrader
 }
 
@@ -105,10 +104,10 @@ func (h *Hub) broadcastEvent(e events.Event) {
 }
 
 // ServeWS upgrades the connection and streams events to the browser.
-// expectedKey is the configured API key; clients must pass ?key=<api_key>.
-func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, expectedKey string) {
+// Clients must pass ?key=<operator key>. validKey decides whether the key is right.
+func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, validKey func(key string) bool) {
 	key := r.URL.Query().Get("key")
-	if key == "" || !security.ConstantTimeEqual(key, expectedKey) {
+	if key == "" || !validKey(key) {
 		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}

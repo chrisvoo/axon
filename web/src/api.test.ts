@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { apiPostJson } from './api'
+import { ApiError, apiGetJson, apiPostJson } from './api'
 
 describe('apiPostJson', () => {
   beforeEach(() => {
@@ -56,5 +56,41 @@ describe('apiPostJson', () => {
     } as Response)
 
     await expect(apiPostJson('/api/test', 'k', {})).rejects.toThrow('Forbidden')
+  })
+})
+
+describe('apiGetJson', () => {
+  beforeEach(() => {
+    vi.stubGlobal('fetch', vi.fn())
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it('sends a GET with the bearer key and no body', async () => {
+    vi.mocked(fetch).mockResolvedValue({ ok: true, json: async () => ({ api_key: 'axon_k_x' }) } as Response)
+
+    const result = await apiGetJson('/api/agent-config', 'axon_o_test')
+
+    expect(fetch).toHaveBeenCalledWith('/api/agent-config', {
+      method: 'GET',
+      headers: { Authorization: 'Bearer axon_o_test' },
+    })
+    expect(result).toEqual({ api_key: 'axon_k_x' })
+  })
+
+  it('throws an ApiError that carries the HTTP status', async () => {
+    vi.mocked(fetch).mockResolvedValue({
+      ok: false,
+      status: 401,
+      text: async () => 'unauthorized',
+      statusText: 'Unauthorized',
+    } as Response)
+
+    const err = (await apiGetJson('/api/agent-config', 'bad').catch((e: ApiError) => e)) as ApiError
+    expect(err).toBeInstanceOf(ApiError)
+    expect(err.status).toBe(401)
+    expect(err.message).toBe('unauthorized')
   })
 })

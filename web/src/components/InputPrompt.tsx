@@ -14,6 +14,8 @@ export function InputPrompt({ processId, apiKey, hint, mockApi }: Props) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [sent, setSent] = useState(false)
+  // Secret input is masked, hidden from the agent and replaced by [redacted] in all output.
+  const [secret, setSecret] = useState(true)
 
   const submit = async (e: FormEvent) => {
     e.preventDefault()
@@ -21,7 +23,12 @@ export function InputPrompt({ processId, apiKey, hint, mockApi }: Props) {
     setError(null)
     try {
       if (!mockApi) {
-        await apiPostJson('/api/input', apiKey, { process_id: processId, data: value })
+        // The masked field is single-line, so Enter must be sent for the prompt to accept it.
+        await apiPostJson('/api/input', apiKey, {
+          process_id: processId,
+          data: secret ? `${value}\n` : value,
+          secret,
+        })
       }
       setValue('')
       setSent(true)
@@ -67,14 +74,43 @@ export function InputPrompt({ processId, apiKey, hint, mockApi }: Props) {
         </div>
       </div>
       <form onSubmit={submit} className="flex flex-col gap-3">
-        <label className="text-xs font-medium uppercase tracking-wide text-zinc-400">stdin</label>
-        <textarea
-          value={value}
-          onChange={(ev) => setValue(ev.target.value)}
-          rows={3}
-          className="w-full resize-y rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-100 outline-none focus:border-amber-500"
-          placeholder="Password or response…"
-        />
+        <label htmlFor="stdin" className="text-xs font-medium uppercase tracking-wide text-zinc-400">
+          stdin
+        </label>
+        {secret ? (
+          <input
+            id="stdin"
+            type="password"
+            autoComplete="new-password"
+            value={value}
+            onChange={(ev) => setValue(ev.target.value)}
+            className="w-full rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-100 outline-none focus:border-amber-500"
+            placeholder="Password"
+          />
+        ) : (
+          <textarea
+            id="stdin"
+            value={value}
+            onChange={(ev) => setValue(ev.target.value)}
+            rows={3}
+            className="w-full resize-y rounded-md border border-zinc-700 bg-zinc-950 px-3 py-2 font-mono text-sm text-zinc-100 outline-none focus:border-amber-500"
+            placeholder="Response…"
+          />
+        )}
+        <label className="flex items-start gap-2 text-xs text-zinc-300">
+          <input
+            type="checkbox"
+            checked={secret}
+            onChange={(ev) => {
+              setSecret(ev.target.checked)
+              setValue('')
+            }}
+            className="mt-0.5"
+          />
+          <span>
+            Secret. Mask it and replace it with [redacted] in everything the agent can read. Best effort: this does not stop a hostile agent. Clear the box for a plain response that the agent may see.
+          </span>
+        </label>
         {error ? <p className="text-sm text-red-400">{error}</p> : null}
         <div className="flex flex-wrap gap-2">
           <button

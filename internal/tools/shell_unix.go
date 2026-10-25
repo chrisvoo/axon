@@ -52,7 +52,9 @@ func runShellPlatform(ctx context.Context, command string, cmdTimeout, stall tim
 	}
 	pm.Put(tp)
 
+	readerDone := make(chan struct{})
 	go func() {
+		defer close(readerDone)
 		br := bufio.NewReader(ptmx)
 		buf := make([]byte, 4096)
 		for {
@@ -114,16 +116,28 @@ func runShellPlatform(ctx context.Context, command string, cmdTimeout, stall tim
 			return ShellResult{Status: "error", ErrorMessage: ctx.Err().Error()}, nil
 
 		case <-ticker.C:
-			if c.ProcessState != nil {
+			select {
+			case <-done:
 				continue
+			default:
 			}
 			if time.Since(time.Unix(0, lastRead.Load())) >= stall {
 				go func() {
+					var res ShellResult
 					select {
 					case <-done:
+						// Let the reader take the last bytes before the snapshot.
+						select {
+						case <-readerDone:
+						case <-time.After(500 * time.Millisecond):
+						}
+						code := exitCodeOf(waitErr)
+						res = ShellResult{Status: "completed", Stdout: tp.snapshot(), ExitCode: &code, Command: command}
 					case <-deadline:
 						tp.Cancel()
+						res = ShellResult{Status: "error", ErrorMessage: "command timed out", Stdout: tp.snapshot(), Command: command}
 					}
+					pm.Finish(id, res)
 					pm.Remove(id)
 					_ = ptmx.Close()
 				}()

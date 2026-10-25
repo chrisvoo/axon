@@ -94,8 +94,10 @@ func runShellPlatform(ctx context.Context, command string, cmdTimeout, stall tim
 			return ShellResult{Status: "error", ErrorMessage: ctx.Err().Error()}, nil
 
 		case <-ticker.C:
-			if c.ProcessState != nil {
+			select {
+			case <-done:
 				continue
+			default:
 			}
 			n := int64(buf.Len())
 			if n > lastLen.Load() {
@@ -104,11 +106,16 @@ func runShellPlatform(ctx context.Context, command string, cmdTimeout, stall tim
 			}
 			if time.Since(time.Unix(0, lastRead.Load())) >= stall {
 				go func() {
+					var res ShellResult
 					select {
 					case <-done:
+						code := exitCodeOf(waitErr)
+						res = ShellResult{Status: "completed", Stdout: tp.snapshot(), ExitCode: &code, Command: command}
 					case <-deadline:
 						tp.Cancel()
+						res = ShellResult{Status: "error", ErrorMessage: "command timed out", Stdout: tp.snapshot(), Command: command}
 					}
+					pm.Finish(id, res)
 					pm.Remove(id)
 					_ = stdin.Close()
 				}()

@@ -26,9 +26,33 @@ describe('InputPrompt', () => {
     expect(screen.queryByText(/enter your sudo/i)).not.toBeInTheDocument()
   })
 
-  it('renders the stdin textarea', () => {
+  it('masks the input by default', () => {
     render(<InputPrompt processId="p1" apiKey="k" />)
+    const field = screen.getByLabelText('stdin')
+    expect(field).toHaveAttribute('type', 'password')
+    expect(field).toHaveAttribute('autocomplete', 'new-password')
+    expect(screen.getByRole('checkbox', { name: /secret/i })).toBeChecked()
+  })
+
+  it('says that hiding the secret is best effort', () => {
+    render(<InputPrompt processId="p1" apiKey="k" />)
+    expect(screen.getByText(/replace it with \[redacted\]/i)).toBeInTheDocument()
+    expect(screen.getByText(/best effort/i)).toBeInTheDocument()
+    expect(screen.getByText(/does not stop a hostile agent/i)).toBeInTheDocument()
+  })
+
+  it('shows a plain textarea when Secret is cleared', async () => {
+    render(<InputPrompt processId="p1" apiKey="k" />)
+    await userEvent.click(screen.getByRole('checkbox', { name: /secret/i }))
     expect(screen.getByRole('textbox')).toBeInTheDocument()
+    expect(screen.getByLabelText('stdin').tagName).toBe('TEXTAREA')
+  })
+
+  it('clears the typed text when the mode changes', async () => {
+    render(<InputPrompt processId="p1" apiKey="k" />)
+    await userEvent.type(screen.getByLabelText('stdin'), 'my-password')
+    await userEvent.click(screen.getByRole('checkbox', { name: /secret/i }))
+    expect(screen.getByLabelText('stdin')).toHaveValue('')
   })
 
   it('renders Send and Cancel buttons', () => {
@@ -37,14 +61,36 @@ describe('InputPrompt', () => {
     expect(screen.getByRole('button', { name: /cancel/i })).toBeInTheDocument()
   })
 
-  it('calls /api/input with the typed value on Send', async () => {
+  it('sends a secret with a trailing newline and the secret flag by default', async () => {
     render(<InputPrompt processId="proc-42" apiKey="test_key" />)
-    await userEvent.type(screen.getByRole('textbox'), 'my-password')
+    await userEvent.type(screen.getByLabelText('stdin'), 'my-password')
     await userEvent.click(screen.getByRole('button', { name: /send/i }))
     expect(api.apiPostJson).toHaveBeenCalledWith('/api/input', 'test_key', {
       process_id: 'proc-42',
-      data: 'my-password',
+      data: 'my-password\n',
+      secret: true,
     })
+  })
+
+  it('sends a plain response as typed, without the secret flag', async () => {
+    render(<InputPrompt processId="proc-42" apiKey="test_key" />)
+    await userEvent.click(screen.getByRole('checkbox', { name: /secret/i }))
+    await userEvent.type(screen.getByRole('textbox'), 'yes{Enter}')
+    await userEvent.click(screen.getByRole('button', { name: /send/i }))
+    expect(api.apiPostJson).toHaveBeenCalledWith('/api/input', 'test_key', {
+      process_id: 'proc-42',
+      data: 'yes\n',
+      secret: false,
+    })
+  })
+
+  it('does not keep the secret in the page after sending', async () => {
+    render(<InputPrompt processId="p1" apiKey="k" />)
+    await userEvent.type(screen.getByLabelText('stdin'), 'my-password')
+    await userEvent.click(screen.getByRole('button', { name: /send/i }))
+    expect(await screen.findByText(/input sent/i)).toBeInTheDocument()
+    expect(screen.queryByDisplayValue('my-password')).not.toBeInTheDocument()
+    expect(document.body.textContent).not.toContain('my-password')
   })
 
   it('shows the "Input sent" confirmation after a successful send', async () => {

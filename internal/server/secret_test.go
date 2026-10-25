@@ -19,16 +19,18 @@ import (
 	"github.com/chrisvoo/axon/internal/audit"
 	"github.com/chrisvoo/axon/internal/config"
 	"github.com/chrisvoo/axon/internal/events"
+	"github.com/chrisvoo/axon/internal/hub"
 	"github.com/chrisvoo/axon/internal/security"
 )
 
 const secretText = "hunter2-Zq9"
 
 type testServer struct {
-	url    string
-	key    string
-	audit  string
-	events <-chan events.Event
+	url      string
+	agentKey string
+	opKey    string
+	audit    string
+	events   <-chan events.Event
 }
 
 func startServer(t *testing.T) *testServer {
@@ -44,7 +46,8 @@ func startServer(t *testing.T) *testServer {
 	cfg := &config.Config{
 		ListenAddr:    "127.0.0.1",
 		ListenPort:    port,
-		APIKey:        "test-key",
+		APIKey:        "agent-key",
+		OperatorKey:   "operator-key",
 		ShellTimeout:  "30s",
 		InputStallSec: 1,
 		AuditLog:      filepath.Join(dir, "audit.log"),
@@ -64,11 +67,11 @@ func startServer(t *testing.T) *testServer {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = Run(ctx, cfg, deny, log, Options{Version: "test", Events: bus, DevMode: true})
+		_ = Run(ctx, cfg, deny, log, Options{Version: "test", Events: bus, Hub: hub.NewHub(bus, "test"), DevMode: true})
 	}()
 	t.Cleanup(func() { cancel(); <-done })
 
-	ts := &testServer{url: fmt.Sprintf("http://127.0.0.1:%d", port), key: cfg.APIKey, audit: cfg.AuditLog, events: sub}
+	ts := &testServer{url: fmt.Sprintf("http://127.0.0.1:%d", port), agentKey: cfg.APIKey, opKey: cfg.OperatorKey, audit: cfg.AuditLog, events: sub}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if resp, err := http.Get(ts.url + "/health"); err == nil {
@@ -85,7 +88,11 @@ func (ts *testServer) post(t *testing.T, path string, body any) string {
 	t.Helper()
 	b, _ := json.Marshal(body)
 	req, _ := http.NewRequest("POST", ts.url+path, bytes.NewReader(b))
-	req.Header.Set("Authorization", "Bearer "+ts.key)
+	key := ts.agentKey
+	if strings.HasPrefix(path, "/api/") { // the dashboard routes need the operator key
+		key = ts.opKey
+	}
+	req.Header.Set("Authorization", "Bearer "+key)
 	req.Header.Set("Content-Type", "application/json")
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {

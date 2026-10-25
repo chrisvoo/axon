@@ -43,7 +43,8 @@ type Config struct {
 	DenylistFile  string   `yaml:"denylist_file"`
 	CertFile      string   `yaml:"cert_file"`
 	KeyFile       string   `yaml:"key_file"`
-	APIKey        string   `yaml:"api_key"`
+	APIKey        string   `yaml:"api_key"`      // the AI agent's key for /mcp
+	OperatorKey   string   `yaml:"operator_key"` // the dashboard's key for /ws and /api/*
 
 	configDir string
 }
@@ -136,6 +137,20 @@ func (c *Config) IdleTimeoutDuration() time.Duration {
 		return 0
 	}
 	return d
+}
+
+// Validate checks the two keys. They must exist and differ: the agent must not
+// hold the key that registers secrets and answers prompts.
+func (c *Config) Validate() error {
+	switch {
+	case c.APIKey == "":
+		return fmt.Errorf("missing API key: run axon init")
+	case c.OperatorKey == "":
+		return fmt.Errorf("missing operator key: run axon init")
+	case c.APIKey == c.OperatorKey:
+		return fmt.Errorf("api_key and operator_key must be different")
+	}
+	return nil
 }
 
 // DenylistPath returns absolute path to denylist file.

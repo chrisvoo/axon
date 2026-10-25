@@ -93,3 +93,26 @@ func TestSendInput_RedactsSecretsInSnapshot(t *testing.T) {
 		t.Fatalf("unexpected stdout: %q", out)
 	}
 }
+
+// Anyone who can call the dashboard route could otherwise register any word and
+// hide it from the audit log and the operator's events.
+func TestSendOperatorInput_UnknownProcessRegistersNothing(t *testing.T) {
+	pm := NewProcManager()
+	if _, err := SendOperatorInput("nope", "curl\n", true, pm); err == nil {
+		t.Fatal("expected an error for an unknown process")
+	}
+	if got := pm.Redact("curl"); got != "curl" {
+		t.Fatalf("an unknown process must not register a secret, got %q", got)
+	}
+}
+
+func TestSendOperatorInput_FinishedProcessRegistersNothing(t *testing.T) {
+	pm := NewProcManager()
+	pm.Finish("p1", ShellResult{Status: "completed", Stdout: "done"})
+	if _, err := SendOperatorInput("p1", "curl\n", true, pm); err != nil {
+		t.Fatal(err)
+	}
+	if got := pm.Redact("curl"); got != "curl" {
+		t.Fatalf("a finished process must not register a secret, got %q", got)
+	}
+}

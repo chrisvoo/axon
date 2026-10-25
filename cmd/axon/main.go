@@ -68,7 +68,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `axon %s — secure remote MCP agent
 
 Commands:
-  init            Create config, TLS certificate, API key, and default denylist
+  init            Create config, TLS certificate, API key, operator key, and default denylist
   serve           Start HTTPS MCP server
     -dev          Plain HTTP, no TLS (local development only)
     -tunnel       Start a Cloudflare quick tunnel and print the public mcp.json snippet
@@ -80,7 +80,8 @@ Commands:
     -port         Override listen port
     -no-browser   Skip opening the dashboard in a browser
   status          Show configuration paths and certificate fingerprint
-  keygen          Rotate API key
+  keygen          Rotate the API key (the agent's key)
+    -operator     Rotate the operator key (the dashboard's key) instead
   version         Print version
 
 `, version)
@@ -95,11 +96,18 @@ func cmdInit() error {
 		return err
 	}
 	if cfg.APIKey == "" {
-		k, err := genAPIKey()
+		k, err := genKey(apiKeyPrefix)
 		if err != nil {
 			return err
 		}
 		cfg.APIKey = k
+	}
+	if cfg.OperatorKey == "" {
+		k, err := genKey(operatorKeyPrefix)
+		if err != nil {
+			return err
+		}
+		cfg.OperatorKey = k
 	}
 	if _, err := os.Stat(cfg.CertFile); os.IsNotExist(err) {
 		if err := security.GenerateSelfSignedCert(cfg.CertFile, cfg.KeyFile); err != nil {
@@ -115,7 +123,8 @@ func cmdInit() error {
 		return err
 	}
 	fmt.Println("Initialized Axon configuration.")
-	fmt.Printf("API key: %s\n", cfg.APIKey)
+	fmt.Printf("API key (the AI agent):      %s\n", cfg.APIKey)
+	fmt.Printf("Operator key (the dashboard): %s\n", cfg.OperatorKey)
 	fp, err := security.CertFingerprint(cfg.CertFile)
 	if err == nil {
 		fmt.Printf("TLS fingerprint: %s\n", fp)
@@ -145,8 +154,8 @@ func cmdServe() error {
 	if err != nil {
 		return err
 	}
-	if cfg.APIKey == "" {
-		return fmt.Errorf("missing API key: run axon init")
+	if err := cfg.Validate(); err != nil {
+		return err
 	}
 	if *addr != "" {
 		cfg.ListenAddr = *addr
@@ -180,7 +189,7 @@ func cmdServe() error {
 
 		printBanner(version)
 		fmt.Printf("  %s  DEV MODE — plain HTTP, no TLS. Do not expose this port externally.\n\n", alertStyle.Render("⚠"))
-		printServerInfo(listenLine, dashboardURL, cfg.APIKey)
+		printServerInfo(listenLine, dashboardURL, cfg.APIKey, cfg.OperatorKey)
 
 		switch {
 		case useNamedTunnel:
@@ -238,7 +247,7 @@ func cmdServe() error {
 		}
 
 		if !*noBrowser {
-			go openBrowser(dashboardURL + "#" + cfg.APIKey)
+			go openBrowser(dashboardURL + "#" + cfg.OperatorKey)
 		}
 
 		return server.Run(ctx, cfg, deny, log, server.Options{
@@ -262,7 +271,7 @@ func cmdServe() error {
 	listenLine := fmt.Sprintf("https://%s:%d/mcp", cfg.ListenAddr, cfg.ListenPort)
 
 	printBanner(version)
-	printServerInfo(listenLine, dashboardURL, cfg.APIKey,
+	printServerInfo(listenLine, dashboardURL, cfg.APIKey, cfg.OperatorKey,
 		fmt.Sprintf("  %s %s", boldStyle.Render("TLS fingerprint:"), dimStyle.Render(fp)),
 	)
 
@@ -275,7 +284,7 @@ func cmdServe() error {
 	printClaudeSection(mcpURL, cfg.APIKey, server.ClaudeCodeMCPConfig(mcpURL))
 
 	if !*noBrowser {
-		go openBrowser(dashboardURL + "#" + cfg.APIKey)
+		go openBrowser(dashboardURL + "#" + cfg.OperatorKey)
 	}
 
 	return server.Run(ctx, cfg, deny, log, server.Options{
@@ -323,6 +332,11 @@ func cmdStatus() error {
 	} else {
 		fmt.Printf("api key set:    no — run axon init\n")
 	}
+	if cfg.OperatorKey != "" {
+		fmt.Printf("operator key:   yes\n")
+	} else {
+		fmt.Printf("operator key:   no — run axon init\n")
+	}
 	return nil
 }
 
@@ -330,11 +344,28 @@ func cmdKeygen() error {
 	if err := rootcheck.EnsureNotRoot(); err != nil {
 		return err
 	}
+	fs := flag.NewFlagSet("keygen", flag.ContinueOnError)
+	operator := fs.Bool("operator", false, "rotate the operator key (the dashboard's key) instead of the API key")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
 	cfg, err := config.Load()
 	if err != nil {
 		return err
 	}
-	k, err := genAPIKey()
+	if *operator {
+		k, err := genKey(operatorKeyPrefix)
+		if err != nil {
+			return err
+		}
+		cfg.OperatorKey = k
+		if err := cfg.Save(); err != nil {
+			return err
+		}
+		fmt.Printf("New operator key: %s\n", k)
+		return nil
+	}
+	k, err := genKey(apiKeyPrefix)
 	if err != nil {
 		return err
 	}
@@ -346,10 +377,15 @@ func cmdKeygen() error {
 	return nil
 }
 
-func genAPIKey() (string, error) {
+const (
+	apiKeyPrefix      = "axon_k_" // the AI agent's key
+	operatorKeyPrefix = "axon_o_" // the dashboard's key
+)
+
+func genKey(prefix string) (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return "axon_k_" + hex.EncodeToString(b), nil
+	return prefix + hex.EncodeToString(b), nil
 }

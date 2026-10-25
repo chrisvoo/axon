@@ -5,7 +5,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# First-time setup (generates API key, TLS cert, denylist in ~/.axon/)
+# First-time setup (generates API key, operator key, TLS cert, denylist in ~/.axon/)
 ./axon init
 
 # Build (compiles web dashboard, then Go binary)
@@ -31,13 +31,13 @@ The `make build` target always rebuilds the frontend first (`web/dist/`) and cop
 
 ## Architecture
 
-Axon is a **remote MCP (Model Context Protocol) server** that exposes the remote machine's shell and filesystem as MCP tools, secured with an API key and (optionally) TLS.
+Axon is a **remote MCP (Model Context Protocol) server** that exposes the remote machine's shell and filesystem as MCP tools, secured with two keys (the agent's API key and the operator's key) and (optionally) TLS.
 
 ### Request flow
 
 ```
 AI client (Claude / Cursor)
-  → POST /mcp (Bearer token auth)
+  → POST /mcp (Bearer API key). The dashboard uses the operator key on /ws and /api/*.
   → internal/server — IP allowlist, rate limit, then API-key check in each handler
   → internal/mcp — JSON-RPC 2.0 dispatch (handleToolsCall)
   → internal/tools — shell / file / search execution
@@ -72,7 +72,7 @@ AI client (Claude / Cursor)
 
 ### Dashboard / WebSocket
 
-The React dashboard connects to `GET /ws` (WebSocket). The user opens the dashboard at `/#<key>`. `App.tsx` reads the key from the URL hash, stores it in `sessionStorage` and removes the hash. The socket then sends the key as the `?key=` query parameter, which `hub.ServeWS` validates. The hub fans out every `events.Event` (tool calls, results, input_required, system stats) to all connected clients. `events.Bus` drops events when a subscriber buffer is full.
+The React dashboard connects to `GET /ws` (WebSocket). The user opens the dashboard at `/#<operator key>`. `App.tsx` reads the key from the URL hash, stores it in `sessionStorage` and removes the hash. The socket then sends the key as the `?key=` query parameter, which `hub.ServeWS` validates against the operator key. `/api/input`, `/api/cancel` and `/api/agent-config` take the operator key as a Bearer token (`requireKey` in `server.go`). `/mcp` takes only the API key. The agent must never get the operator key: it can register secrets and answer prompts. `Config.Validate` requires two different keys. `GET /api/agent-config` gives the API key to the dashboard for its setup snippet. The hub fans out every `events.Event` (tool calls, results, input_required, system stats) to all connected clients. `events.Bus` drops events when a subscriber buffer is full.
 
 ### Dev vs production mode
 

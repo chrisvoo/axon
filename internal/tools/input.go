@@ -27,10 +27,11 @@ func SendInput(id, data string, pm *ProcManager) ([]byte, error) {
 
 // SendOperatorInput writes input typed by the operator in the dashboard. When
 // secret is true, the text is registered first, so that it is replaced by
-// [redacted] in every output the agent can read, from any process.
+// [redacted] in every output the agent can read, from any process. Only a live
+// process registers a secret.
 func SendOperatorInput(id, data string, secret bool, pm *ProcManager) ([]byte, error) {
 	if secret {
-		pm.AddSecret(data)
+		pm.AddSecret(id, data)
 	}
 	return SendInput(id, data, pm)
 }

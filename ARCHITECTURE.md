@@ -8,8 +8,8 @@ This document shows the parts of Axon, the actors, and how data moves between th
 
 | Actor | What it does |
 |---|---|
-| AI agent | Claude Code, Cursor or another MCP client. It sends `tools/call` requests with the API key. |
-| Operator | A person with the dashboard open in a browser. The operator watches activity, answers `input_required` prompts and cancels commands. |
+| AI agent | Claude Code, Cursor or another MCP client. It sends `tools/call` requests with the API key. It does not have the operator key. |
+| Operator | A person with the dashboard open in a browser. The operator holds the operator key. The operator watches activity, answers `input_required` prompts and cancels commands. |
 | Remote user | The person who owns the remote machine. This person runs `sudo` commands by hand. Axon never runs them. |
 | Cloudflare | Optional. `cloudflared` gives Axon a public HTTPS URL without port forwarding. |
 
@@ -19,7 +19,7 @@ This document shows the parts of Axon, the actors, and how data moves between th
 |---|---|---|
 | Transport | TLS with a self-signed certificate, or plain HTTP on `127.0.0.1` behind a Cloudflare tunnel | `internal/security/tls.go`, `internal/tunnel` |
 | HTTP server | Go 1.25 `net/http` with method-aware `ServeMux` routes | `internal/server` |
-| Guards | IP allowlist, per-IP rate limit (`golang.org/x/time/rate`), constant-time API key check | `internal/security` |
+| Guards | IP allowlist, per-IP rate limit (`golang.org/x/time/rate`), constant-time key check (API key for `/mcp`, operator key for the dashboard) | `internal/security` |
 | MCP | JSON-RPC 2.0 over `POST /mcp` | `internal/mcp` |
 | Tools | Shell in a pty (`creack/pty`), file tools, `grep`, `glob`, host stats (`gopsutil`) | `internal/tools` |
 | Events | In-process pub/sub and a WebSocket hub (`gorilla/websocket`) | `internal/events`, `internal/hub` |
@@ -73,7 +73,7 @@ Green boxes are the request path. Amber boxes are the event and audit path. Gray
 
 1. The agent sends a JSON-RPC request to `POST /mcp` with `Authorization: Bearer <API key>`.
 2. The request reaches Axon over HTTPS. In tunnel modes, `cloudflared` receives the request and forwards it to `http://127.0.0.1:<port>`.
-3. The HTTP server checks the IP allowlist and the rate limit. The handler then checks the API key. Any failure ends the request.
+3. The HTTP server checks the IP allowlist and the rate limit. The handler then checks the key for that route: the API key for `/mcp`, the operator key for `/ws` and `/api/*`. Any failure ends the request.
 4. The MCP handler reads the method: `initialize`, `tools/list` or `tools/call`.
 5. For `shell`, the policy checks run in this order:
    - A command that contains `sudo` never runs. It goes to the dashboard.
@@ -91,8 +91,9 @@ Green boxes are the request path. Amber boxes are the event and audit path. Gray
 
 **Dashboard**
 
-- The operator opens `/#<API key>`. The page stores the key in `sessionStorage`, removes it from the URL, and opens `GET /ws?key=<API key>`.
-- The dashboard calls `POST /api/input` and `POST /api/cancel` with the same key as a Bearer token.
+- The operator opens `/#<operator key>`. The page stores the key in `sessionStorage`, removes it from the URL, and opens `GET /ws?key=<operator key>`.
+- The dashboard calls `POST /api/input` and `POST /api/cancel` with the operator key as a Bearer token. The API key does not work on these routes, and the operator key does not work on `/mcp`.
+- The dashboard reads the API key from `GET /api/agent-config` (operator key only) to show the agent's setup snippet.
 - The static dashboard files (`GET /`) and `GET /health` need no key and have no allowlist or rate limit.
 
 **Human step**
@@ -151,8 +152,8 @@ The agent continues with `send_input` and the `process_id`. Axon writes the data
 The operator can type a password in the dashboard when a command waits for input. The password must reach the command and nothing else.
 
 1. The dashboard shows a masked field. The `Secret` box is on by default.
-2. The dashboard sends `POST /api/input` with `secret: true`. The server treats a missing `secret` as `true`.
-3. Axon registers each typed line in one secret store, then writes the text to the pty. The store belongs to the process manager, not to one process. Each entry lasts 10 minutes. The order matters: no output exists that could show the text before it is registered.
+2. The dashboard sends `POST /api/input` with the operator key and `secret: true`. The server treats a missing `secret` as `true`. Only the operator key reaches this route. If the agent could call it, the agent could register words of its choice and hide them from the audit log and the events.
+3. Axon registers each typed line in one secret store, then writes the text to the pty. Only a live process can register a secret: an unknown or ended process registers nothing. The store belongs to the process manager, so it covers all processes. A secret lasts as long as its process, then 10 minutes. The order matters: no output exists that could show the text before it is registered.
 4. Everything the agent or the dashboard can read passes the store, and the store replaces the text with `[redacted]`:
    - the output of every `shell` call, also of other commands that run later
    - the `send_input` result and the stored final result
@@ -168,7 +169,7 @@ Limits. The protection is best effort:
 
 - Axon replaces exact text. A changed copy of the secret (a hash, base64, or terminal redraw codes inside the text) is not replaced.
 - The store replaces the text everywhere, also in ordinary output. A short secret such as `root` makes other output hard to read. This is the cost of the `Secret` box.
-- After 10 minutes the text is no longer replaced.
+- The text is no longer replaced 10 minutes after its process ends.
 - A hostile agent that can run commands as the Axon user has other ways to read a process, for example `ptrace` or `/proc`. Run Axon as a dedicated user and keep `ptrace_scope` at 1 or higher. The `Secret` box stops accidental exposure, not an attacker.
 - In tunnel mode, Cloudflare handles the traffic between the browser and Axon.
 - A plain response (the `Secret` box off) reaches the agent on purpose.
@@ -187,7 +188,7 @@ Limits. The protection is best effort:
 
 ## Trust and limits
 
-- The API key is the only credential. Anyone with the key can run any command that the Axon user can run.
+- There are two credentials. The API key runs any command that the Axon user can run. The operator key controls the dashboard: it answers prompts, registers secrets, cancels commands and reads the API key. Keep the operator key away from the agent.
 - The denylist and the `sudo` check are guardrails. A client can bypass them. Run Axon as an unprivileged user without passwordless `sudo`.
 - In tunnel modes, every request comes from `127.0.0.1`. The IP allowlist and the per-IP rate limit cannot tell clients apart.
 

@@ -57,7 +57,7 @@ Severity: **High** can lead to full compromise or loss of audit trust. **Medium*
 | M3 | No limit on concurrent commands. The rate limit is 20 requests per second per IP, and a command can run 5 minutes. | Code. | Cap running processes. Return an error at the cap. |
 | M4 | In tunnel mode every request comes from `127.0.0.1`. The IP allowlist does nothing and all clients share one rate limit. | Code. | Trust `Cf-Connecting-Ip` only when the peer is loopback and a tunnel is active. |
 | M5 | Failed logins leave no trace. | Probe: 0 audit lines after a wrong key. | Audit failures. Add a short delay or a lockout per IP. |
-| M6 | One static key serves the agent and the dashboard. The key cannot rotate without a restart. `axon keygen` does not change a running server. | Code. | Use separate keys with separate rights. Reload the key on `SIGHUP`. |
+| M6 | One static key served the agent and the dashboard. **Fixed in part:** there are now two keys. The operator key opens `/ws`, `/api/input`, `/api/cancel` and `/api/agent-config`. The API key opens `/mcp` only. Still open: a key cannot rotate without a restart (`axon keygen` does not change a running server). | Probe and tests: each route accepts only its own key. | Reload the keys on `SIGHUP`. |
 | M7 | The key appears in places other users and logs can see: the `?key=` query of the WebSocket (proxy and Cloudflare logs), the arguments of `open` or `xdg-open` (`ps`), and the terminal banner. | Code: `hub.go:110`, `main.go:288`. | Send the key in the first WebSocket message. Open the browser without the key in the arguments. |
 | M8 | The WebSocket accepts any `Origin`. | Probe: a foreign Origin got `101`. | Check `Origin` against the host. |
 | M9 | The dashboard has no security headers (CSP, frame-ancestors, nosniff). The page holds the key and takes secrets. | Code: plain `http.FileServer`. | Add a strict CSP and `X-Frame-Options: DENY`. |
@@ -103,7 +103,13 @@ What the code guarantees, with tests:
 | Audit log and server log | `[redacted]` in the detail. No input text. |
 | Browser | The field is masked, `autocomplete="new-password"`. The text is cleared after sending. It is not stored. |
 
-How it works: one secret store on the process manager. It holds each typed line and its JSON-escaped form for 10 minutes. The text is registered before it is written to the pty. The server treats a missing `secret` flag as `true`.
+Two reviews found three weaknesses in the first versions. All are fixed and tested:
+
+- **A store for each process** missed a program that writes the text to a file. Now one shared store covers all output.
+- **Anyone with the API key could register secrets.** The agent holds the API key. It called the dashboard route with an unknown process id and the word `curl`. Axon stored the word, and the audit line of the agent's next command no longer showed `curl` (probe). Now two things stop this. Only the operator key reaches the dashboard routes. And only a live process registers a secret.
+- **A secret could expire before its process ended.** The 10-minute limit ran from the moment of typing. A long command could outlive it. Now a secret lasts as long as its process, then 10 minutes.
+
+How it works: one secret store on the process manager. It holds each typed line and its JSON-escaped form. A secret lasts as long as its process, then 10 minutes. The text is registered before it is written to the pty. The server treats a missing `secret` flag as `true`.
 
 Why the store is shared: a review of the first version found that a store for each process missed a program that writes the text to a file. The agent could then read the file with `cat` or `read_file`. A test now covers this case.
 
@@ -111,7 +117,7 @@ Limits. The protection is best effort:
 
 - **Exact text only.** A changed copy is not replaced: a hash, base64, or a terminal that redraws the line with control codes.
 - **Over-redaction.** The store replaces the text in all output. A short secret such as `root` also replaces ordinary words. The operator chooses this with the `Secret` box.
-- **Time limit.** After 10 minutes the text is no longer replaced.
+- **Time limit.** The text is no longer replaced 10 minutes after its process ends.
 - **Same-user access.** A hostile agent runs as the Axon user. It can try `ptrace`, `/proc` or other tools on the target process. On Linux, keep `kernel.yama.ptrace_scope` at 1 or higher and run Axon as a dedicated user. I did not test this on Linux.
 - **Tunnel.** Cloudflare ends the TLS connection. The browser's request, with the password, passes through its network.
 - **Plain responses.** With the `Secret` box off, the agent sees the text on purpose.
@@ -140,6 +146,6 @@ Limits. The protection is best effort:
 2. Send the audit log to a sink the Axon user cannot edit (H2).
 3. Add server timeouts, a body limit and a process cap (M1, M2, M3).
 4. Fix TLS: host names in the certificate, a full fingerprint, a short guide for clients (H5).
-5. Separate the dashboard key from the agent key. Stop putting the key in the WebSocket URL and in process arguments (M6, M7).
+5. Reload keys without a restart. Stop putting the operator key in the WebSocket URL and in process arguments (M6, M7). The separate operator key is done.
 6. Add security headers and an `Origin` check (M8, M9).
 7. Harden the install and release steps (M11, M12, M13). Run `govulncheck` in CI.

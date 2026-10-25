@@ -19,8 +19,9 @@ const finishedTTL = 2 * time.Minute
 const secretTTL = 10 * time.Minute
 
 // ProcManager tracks running shell processes for send_input / cancel_command.
-// It also keeps the operator's secrets. They are not tied to one process:
-// any text the agent can read must pass through Redact.
+// It also keeps the operator's secrets. They are shared by all processes, so
+// any text the agent can read must pass through Redact. A secret lives as long
+// as the process it was typed into, then for secretTTL.
 type ProcManager struct {
 	mu       sync.Mutex
 	procs    map[string]*TrackedProc
@@ -30,8 +31,9 @@ type ProcManager struct {
 }
 
 type secretEntry struct {
+	proc    string // the process it was typed into; "" if none
 	text    string
-	expires time.Time
+	expires time.Time // zero while that process is live
 }
 
 type finishedProc struct {
@@ -83,6 +85,7 @@ func (m *ProcManager) Finish(id string, res ShellResult) {
 		}
 	}
 	m.finished[id] = finishedProc{result: res, expires: now.Add(finishedTTL)}
+	m.releaseSecretsLocked(id)
 }
 
 // Finished returns the recorded result of a process that has ended.
@@ -139,20 +142,40 @@ func (m *ProcManager) SnapshotOutput(id string) string {
 	return m.Redact(p.snapshot())
 }
 
-// AddSecret hides operator input for secretTTL. Call it before the input is
-// written, so that the terminal echo is never visible.
-func (m *ProcManager) AddSecret(data string) {
+// AddSecret hides operator input. Call it before the input is written, so that
+// the terminal echo is never visible. A secret needs a live process: for an
+// unknown or ended process nothing is registered and the result is false. This
+// stops a caller from hiding words of its choice. An empty procID registers a
+// secret that lasts secretTTL.
+func (m *ProcManager) AddSecret(procID, data string) bool {
 	lines := secretLines(data)
 	if len(lines) == 0 {
-		return
+		return false
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	expires := m.now().Add(secretTTL)
+	var expires time.Time // zero: until the process ends
+	if procID == "" {
+		expires = m.now().Add(secretTTL)
+	} else if p, ok := m.procs[procID]; !ok || p.SendInput == nil {
+		return false
+	}
 	for _, line := range lines {
-		m.secrets = append(m.secrets, secretEntry{line, expires})
+		m.secrets = append(m.secrets, secretEntry{procID, line, expires})
 		if enc := jsonForm(line); enc != line {
-			m.secrets = append(m.secrets, secretEntry{enc, expires})
+			m.secrets = append(m.secrets, secretEntry{procID, enc, expires})
+		}
+	}
+	return true
+}
+
+// releaseSecretsLocked starts the countdown for the secrets of a process that
+// has ended. The caller holds m.mu.
+func (m *ProcManager) releaseSecretsLocked(id string) {
+	expires := m.now().Add(secretTTL)
+	for i := range m.secrets {
+		if m.secrets[i].proc == id && m.secrets[i].expires.IsZero() {
+			m.secrets[i].expires = expires
 		}
 	}
 }
@@ -164,7 +187,7 @@ func (m *ProcManager) Redact(s string) string {
 	}
 	m.mu.Lock()
 	now := m.now()
-	m.secrets = slices.DeleteFunc(m.secrets, func(e secretEntry) bool { return !now.Before(e.expires) })
+	m.secrets = slices.DeleteFunc(m.secrets, func(e secretEntry) bool { return !e.expires.IsZero() && !now.Before(e.expires) })
 	active := make([]string, len(m.secrets))
 	for i, e := range m.secrets {
 		active[i] = e.text
@@ -187,6 +210,7 @@ func (m *ProcManager) Remove(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.procs, id)
+	m.releaseSecretsLocked(id)
 }
 
 // Get returns a tracked process.
@@ -202,6 +226,7 @@ func (m *ProcManager) Cancel(id string) bool {
 	p, ok := m.procs[id]
 	if ok {
 		delete(m.procs, id)
+		m.releaseSecretsLocked(id)
 	}
 	m.mu.Unlock()
 	if !ok || p == nil || p.Cancel == nil {

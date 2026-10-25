@@ -26,7 +26,7 @@ export function ConnectScreen({ onConnect }: Props) {
       <div className="w-full max-w-md rounded-2xl border border-zinc-800 bg-zinc-900/80 p-8 shadow-xl backdrop-blur">
         <div className="mb-6 text-center">
           <div className="mb-2 text-2xl font-semibold tracking-tight text-white">Axon</div>
-          <p className="text-sm text-zinc-400">Enter the operator key shown when you run `axon serve`</p>
+          <p className="text-sm text-zinc-400">Enter the operator key that `axon init` showed once</p>
         </div>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <label className="flex flex-col gap-2 text-sm font-medium text-zinc-300">

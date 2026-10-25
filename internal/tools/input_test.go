@@ -116,3 +116,13 @@ func TestSendOperatorInput_FinishedProcessRegistersNothing(t *testing.T) {
 		t.Fatalf("a finished process must not register a secret, got %q", got)
 	}
 }
+
+func TestSendOperatorInput_EmptyProcessIDRegistersNothing(t *testing.T) {
+	pm := NewProcManager()
+	if _, err := SendOperatorInput("", "curl\n", true, pm); err == nil {
+		t.Fatal("expected an error for an empty process id")
+	}
+	if got := pm.Redact("curl"); got != "curl" {
+		t.Fatalf("an empty process id must not register a secret, got %q", got)
+	}
+}

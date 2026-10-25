@@ -44,7 +44,7 @@ Severity: **High** can lead to full compromise or loss of audit trust. **Medium*
 |---|---|---|---|
 | H1 | The agent can read the API key and the TLS key with `read_file`. | Probe: the `api_key` line was visible. | Run Axon as a dedicated user. Keep keys out of the agent's reach, for example a root-owned config read at start. |
 | H2 | The agent can erase or edit its own audit log. | Probe: `write_file` on `audit.log` left 0 lines. | Send audit lines to a sink the Axon user cannot edit (journald, syslog, an append-only file owned by another user). |
-| H3 | The agent can empty the denylist and change `config.yaml` (`read_only`, `ip_allowlist`). The change applies at the next start. | Probe: `write_file` on `denylist.txt` returned `ok`. | Same as H1. Make the config read-only for the Axon user. |
+| H3 | The agent can empty the denylist and change `config.yaml` (`read_only`, `ip_allowlist`). The change applies at the next start. This includes replacing the operator key hash with the hash of a key that the agent chose. | Probe: `write_file` on `denylist.txt` returned `ok`. | Same as H1. Make the config read-only for the Axon user. |
 | H4 | The denylist and the `sudo` check are bypassable. | Probe: `echo mk''fs` ran. `/usr/bin/sudo` was a bug and is fixed. A script that calls `sudo` still passes. Code: patterns are plain substrings. | Treat both as guardrails. Use OS controls: no sudo rights for the Axon user, containers or a sandbox. |
 | H5 | The default TLS setup leads users to turn off verification. The certificate is valid only for `localhost` and `127.0.0.1`. The printed fingerprint is 64 bits. | Code: `tls.go` lines 43 and 101. | Add a flag for host names (SANs). Print the full SHA-256. Document how clients trust the certificate. |
 
@@ -57,8 +57,8 @@ Severity: **High** can lead to full compromise or loss of audit trust. **Medium*
 | M3 | No limit on concurrent commands. The rate limit is 20 requests per second per IP, and a command can run 5 minutes. | Code. | Cap running processes. Return an error at the cap. |
 | M4 | In tunnel mode every request comes from `127.0.0.1`. The IP allowlist does nothing and all clients share one rate limit. | Code. | Trust `Cf-Connecting-Ip` only when the peer is loopback and a tunnel is active. |
 | M5 | Failed logins leave no trace. | Probe: 0 audit lines after a wrong key. | Audit failures. Add a short delay or a lockout per IP. |
-| M6 | One static key served the agent and the dashboard. **Fixed in part:** there are now two keys. The operator key opens `/ws`, `/api/input`, `/api/cancel` and `/api/agent-config`. The API key opens `/mcp` only. Still open: a key cannot rotate without a restart (`axon keygen` does not change a running server). | Probe and tests: each route accepts only its own key. | Reload the keys on `SIGHUP`. |
-| M7 | The key appears in places other users and logs can see: the `?key=` query of the WebSocket (proxy and Cloudflare logs), the arguments of `open` or `xdg-open` (`ps`), and the terminal banner. | Code: `hub.go:110`, `main.go:288`. | Send the key in the first WebSocket message. Open the browser without the key in the arguments. |
+| M6 | One static key served the agent and the dashboard. **Fixed in part:** there are now two keys. The operator key opens `/ws`, `/api/input`, `/api/cancel` and `/api/agent-config`. The API key opens `/mcp` only. The config stores only a SHA-256 hash of the operator key, so the agent cannot read it. Still open: a key cannot rotate without a restart (`axon keygen` does not change a running server). | Probe and tests: each route accepts only its own key. The stored hash is not accepted as a key. The agent cannot find the operator key in `config.yaml`. | Reload the keys on `SIGHUP`. |
+| M7 | The key appears in places other users and logs can see: the `?key=` query of the WebSocket (proxy and Cloudflare logs), the arguments of `open` or `xdg-open` (`ps`), and the terminal banner. **Fixed in part:** `axon serve` no longer prints the operator key and opens the browser without a key. Still open: the WebSocket query. | Code: `hub.go`. | Send the key in the first WebSocket message. |
 | M8 | The WebSocket accepts any `Origin`. | Probe: a foreign Origin got `101`. | Check `Origin` against the host. |
 | M9 | The dashboard has no security headers (CSP, frame-ancestors, nosniff). The page holds the key and takes secrets. | Code: plain `http.FileServer`. | Add a strict CSP and `X-Frame-Options: DENY`. |
 | M10 | `GET /` and `GET /health` have no guard and no rate limit. | Probe: both returned 200. | Apply the rate limit. Keep `/health` minimal. |
@@ -103,10 +103,12 @@ What the code guarantees, with tests:
 | Audit log and server log | `[redacted]` in the detail. No input text. |
 | Browser | The field is masked, `autocomplete="new-password"`. The text is cleared after sending. It is not stored. |
 
-Two reviews found three weaknesses in the first versions. All are fixed and tested:
+Three reviews found five weaknesses in the first versions. All are fixed and tested:
 
 - **A store for each process** missed a program that writes the text to a file. Now one shared store covers all output.
 - **Anyone with the API key could register secrets.** The agent holds the API key. It called the dashboard route with an unknown process id and the word `curl`. Axon stored the word, and the audit line of the agent's next command no longer showed `curl` (probe). Now two things stop this. Only the operator key reaches the dashboard routes. And only a live process registers a secret.
+- **The agent could read the operator key.** The first version of the separate key stored it in `config.yaml`. The agent read that file with `read_file` and used the key (probe). Now the file holds only a SHA-256 hash. A hash does not work as a key. Axon shows the key once, in `axon init` and `axon keygen -operator`. It does not print the key at startup, and the browser opens without it.
+- **An empty process id passed the live-process check.** With the key, a call with `process_id: ""` registered a word and hid it from the audit log (probe). Now `AddSecret` needs a live process and the route rejects an empty id.
 - **A secret could expire before its process ended.** The 10-minute limit ran from the moment of typing. A long command could outlive it. Now a secret lasts as long as its process, then 10 minutes.
 
 How it works: one secret store on the process manager. It holds each typed line and its JSON-escaped form. A secret lasts as long as its process, then 10 minutes. The text is registered before it is written to the pty. The server treats a missing `secret` flag as `true`.
@@ -146,6 +148,6 @@ Limits. The protection is best effort:
 2. Send the audit log to a sink the Axon user cannot edit (H2).
 3. Add server timeouts, a body limit and a process cap (M1, M2, M3).
 4. Fix TLS: host names in the certificate, a full fingerprint, a short guide for clients (H5).
-5. Reload keys without a restart. Stop putting the operator key in the WebSocket URL and in process arguments (M6, M7). The separate operator key is done.
+5. Reload keys without a restart. Stop putting the operator key in the WebSocket URL (M6, M7). The separate operator key and its hash are done.
 6. Add security headers and an `Origin` check (M8, M9).
 7. Harden the install and release steps (M11, M12, M13). Run `govulncheck` in CI.

@@ -53,7 +53,7 @@ func TestProcManager_FinishDropsExpiredResults(t *testing.T) {
 
 func TestProcManager_SecretStoreCoversAnyOutput(t *testing.T) {
 	pm := NewProcManager()
-	pm.AddSecret("", "hunter2\n")
+	addTimedSecret(pm, "hunter2\n")
 	if got := pm.Redact("a hunter2 b"); got != "a [redacted] b" {
 		t.Fatalf("got %q", got)
 	}
@@ -63,7 +63,7 @@ func TestProcManager_SecretExpires(t *testing.T) {
 	pm := NewProcManager()
 	now := time.Unix(1000, 0)
 	pm.now = func() time.Time { return now }
-	pm.AddSecret("", "hunter2")
+	addTimedSecret(pm, "hunter2")
 
 	now = now.Add(secretTTL - time.Second)
 	if got := pm.Redact("hunter2"); got != "[redacted]" {
@@ -83,7 +83,7 @@ func TestProcManager_SecretExpires(t *testing.T) {
 func TestProcManager_SecretIsHiddenInJSONEncodedOutput(t *testing.T) {
 	const secret = `hu"nt\er2<Zq9`
 	pm := NewProcManager()
-	pm.AddSecret("", secret+"\n")
+	addTimedSecret(pm, secret+"\n")
 
 	encoded, err := json.Marshal(map[string]string{"text": "password=" + secret})
 	if err != nil {
@@ -100,7 +100,7 @@ func TestProcManager_SecretIsHiddenInJSONEncodedOutput(t *testing.T) {
 
 func TestProcManager_WhitespaceOnlyInputIsNotASecret(t *testing.T) {
 	pm := NewProcManager()
-	pm.AddSecret("", "  \n")
+	addTimedSecret(pm, "  \n")
 	if got := pm.Redact("a b c"); got != "a b c" {
 		t.Fatalf("got %q", got)
 	}
@@ -118,7 +118,7 @@ func TestProcManager_SecretFromOneProcessIsHiddenInAnother(t *testing.T) {
 	pm := NewProcManager()
 	other := &TrackedProc{ID: "other", OutBuf: bytes.NewBufferString("leftover: hunter2\n")}
 	pm.Put(other)
-	pm.AddSecret("", "hunter2\n") // typed into some other process
+	addTimedSecret(pm, "hunter2\n") // typed into some other process
 
 	if got := pm.SnapshotOutput("other"); got != "leftover: [redacted]\n" {
 		t.Fatalf("got %q", got)
@@ -127,7 +127,7 @@ func TestProcManager_SecretFromOneProcessIsHiddenInAnother(t *testing.T) {
 
 func TestProcManager_RedactResultKeepsTheCommand(t *testing.T) {
 	pm := NewProcManager()
-	pm.AddSecret("", "hunter2")
+	addTimedSecret(pm, "hunter2")
 	res := pm.redactResult(ShellResult{
 		Command:    "echo hunter2",
 		Stdout:     "hunter2",
@@ -146,7 +146,7 @@ func TestSendInput_RedactsFinishedResultWithCurrentSecrets(t *testing.T) {
 	pm := NewProcManager()
 	code := 0
 	pm.Finish("p1", ShellResult{Status: "completed", Stdout: "token hunter2\n", ExitCode: &code})
-	pm.AddSecret("", "hunter2") // typed after the process ended
+	addTimedSecret(pm, "hunter2") // typed after the process ended
 
 	b, err := SendInput("p1", "", pm)
 	if err != nil {
@@ -225,6 +225,33 @@ func TestProcManager_NoSecretForAnUnknownProcess(t *testing.T) {
 	pm := NewProcManager()
 	if pm.AddSecret("nope", "curl") {
 		t.Fatal("an unknown process must not register a secret")
+	}
+	if got := pm.Redact("curl"); got != "curl" {
+		t.Fatalf("got %q", got)
+	}
+}
+
+// addTimedSecret registers a secret that belongs to no process and lasts
+// secretTTL. AddSecret never does this: it needs a live process.
+func addTimedSecret(pm *ProcManager, data string) {
+	pm.mu.Lock()
+	defer pm.mu.Unlock()
+	expires := pm.now().Add(secretTTL)
+	for _, line := range secretLines(data) {
+		pm.secrets = append(pm.secrets, secretEntry{"", line, expires})
+		if enc := jsonForm(line); enc != line {
+			pm.secrets = append(pm.secrets, secretEntry{"", enc, expires})
+		}
+	}
+}
+
+func TestProcManager_AddSecretNeedsAProcessID(t *testing.T) {
+	pm := NewProcManager()
+	if pm.AddSecret("", "curl\n") {
+		t.Fatal("an empty process id must not register a secret")
+	}
+	if len(pm.secrets) != 0 {
+		t.Fatalf("nothing may be stored, %d entries found", len(pm.secrets))
 	}
 	if got := pm.Redact("curl"); got != "curl" {
 		t.Fatalf("got %q", got)

@@ -44,12 +44,10 @@ func hyperlink(url, text string) string {
 	return "\033]8;;" + url + "\033\\" + text + "\033]8;;\033\\"
 }
 
-func printServerInfo(listenLine, dashboardURL, apiKey, operatorKey string, extra ...string) {
-	dashWithKey := dashboardURL + "#" + operatorKey
-
+func printServerInfo(listenLine, dashboardURL, apiKey string, extra ...string) {
 	fmt.Printf("  %s  %s\n", boldStyle.Render("Listening:"), cyanStyle.Render(listenLine))
-	fmt.Printf("  %s   %s\n", boldStyle.Render("Dashboard:"), hyperlink(dashWithKey, cyanStyle.Render(dashWithKey)))
-	fmt.Printf("  %s %s %s\n", boldStyle.Render("Operator key:"), greenStyle.Render(operatorKey), dimStyle.Render("(dashboard)"))
+	fmt.Printf("  %s   %s\n", boldStyle.Render("Dashboard:"), hyperlink(dashboardURL, cyanStyle.Render(dashboardURL)))
+	fmt.Printf("  %s %s\n", boldStyle.Render("Operator key:"), dimStyle.Render("enter it in the dashboard (axon init showed it once)"))
 	fmt.Printf("  %s      %s %s\n", boldStyle.Render("API key:"), greenStyle.Render(apiKey), dimStyle.Render("(AI agent)"))
 
 	for _, line := range extra {

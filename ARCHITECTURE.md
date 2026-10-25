@@ -9,7 +9,7 @@ This document shows the parts of Axon, the actors, and how data moves between th
 | Actor | What it does |
 |---|---|
 | AI agent | Claude Code, Cursor or another MCP client. It sends `tools/call` requests with the API key. It does not have the operator key. |
-| Operator | A person with the dashboard open in a browser. The operator holds the operator key. The operator watches activity, answers `input_required` prompts and cancels commands. |
+| Operator | A person with the dashboard open in a browser. The operator holds the operator key. Axon shows it once and stores only a hash. The operator watches activity, answers `input_required` prompts and cancels commands. |
 | Remote user | The person who owns the remote machine. This person runs `sudo` commands by hand. Axon never runs them. |
 | Cloudflare | Optional. `cloudflared` gives Axon a public HTTPS URL without port forwarding. |
 
@@ -91,7 +91,7 @@ Green boxes are the request path. Amber boxes are the event and audit path. Gray
 
 **Dashboard**
 
-- The operator opens `/#<operator key>`. The page stores the key in `sessionStorage`, removes it from the URL, and opens `GET /ws?key=<operator key>`.
+- The operator opens the dashboard and pastes the operator key. The page stores it in `sessionStorage` and opens `GET /ws?key=<operator key>`. (A key in the address fragment also works. `axon serve` does not put one there, so it never shows in the process list.)
 - The dashboard calls `POST /api/input` and `POST /api/cancel` with the operator key as a Bearer token. The API key does not work on these routes, and the operator key does not work on `/mcp`.
 - The dashboard reads the API key from `GET /api/agent-config` (operator key only) to show the agent's setup snippet.
 - The static dashboard files (`GET /`) and `GET /health` need no key and have no allowlist or rate limit.
@@ -152,7 +152,7 @@ The agent continues with `send_input` and the `process_id`. Axon writes the data
 The operator can type a password in the dashboard when a command waits for input. The password must reach the command and nothing else.
 
 1. The dashboard shows a masked field. The `Secret` box is on by default.
-2. The dashboard sends `POST /api/input` with the operator key and `secret: true`. The server treats a missing `secret` as `true`. Only the operator key reaches this route. If the agent could call it, the agent could register words of its choice and hide them from the audit log and the events.
+2. The dashboard sends `POST /api/input` with the operator key and `secret: true`. The server treats a missing `secret` as `true`. Only the operator key reaches this route, and `process_id` must not be empty. If the agent could call it, the agent could register words of its choice and hide them from the audit log and the events.
 3. Axon registers each typed line in one secret store, then writes the text to the pty. Only a live process can register a secret: an unknown or ended process registers nothing. The store belongs to the process manager, so it covers all processes. A secret lasts as long as its process, then 10 minutes. The order matters: no output exists that could show the text before it is registered.
 4. Everything the agent or the dashboard can read passes the store, and the store replaces the text with `[redacted]`:
    - the output of every `shell` call, also of other commands that run later
@@ -188,7 +188,7 @@ Limits. The protection is best effort:
 
 ## Trust and limits
 
-- There are two credentials. The API key runs any command that the Axon user can run. The operator key controls the dashboard: it answers prompts, registers secrets, cancels commands and reads the API key. Keep the operator key away from the agent.
+- There are two credentials. The API key runs any command that the Axon user can run. The operator key controls the dashboard: it answers prompts, registers secrets, cancels commands and reads the API key. Keep the operator key away from the agent. The config file holds only a SHA-256 hash of the operator key, because the agent can read that file. A hash does not work as a key. The agent can overwrite the hash, and the change applies at the next start.
 - The denylist and the `sudo` check are guardrails. A client can bypass them. Run Axon as an unprivileged user without passwordless `sudo`.
 - In tunnel modes, every request comes from `127.0.0.1`. The IP allowlist and the per-IP rate limit cannot tell clients apart.
 

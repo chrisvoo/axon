@@ -9,6 +9,8 @@ import (
 	"os"
 	"strings"
 	"testing"
+
+	"github.com/chrisvoo/axon/internal/config"
 )
 
 func (ts *testServer) status(t *testing.T, method, path, key string, header http.Header, body string) (int, string, http.Header) {
@@ -67,6 +69,24 @@ func TestEachRouteAcceptsOnlyItsOwnKey(t *testing.T) {
 	}
 }
 
+// The config file holds a hash. The agent can read it, so it must not work as a key.
+func TestStoredHashIsNotAKey(t *testing.T) {
+	ts := startServer(t)
+	hash := config.HashKey(ts.opKey)
+	for _, path := range []string{"/api/input", "/api/cancel"} {
+		got, _, _ := ts.status(t, "POST", path, hash, nil, `{"process_id":"nope"}`)
+		if got != http.StatusUnauthorized {
+			t.Errorf("%s with the stored hash: got HTTP %d, want 401", path, got)
+		}
+	}
+	if got, _, _ := ts.status(t, "GET", "/api/agent-config", hash, nil, ""); got != http.StatusUnauthorized {
+		t.Errorf("/api/agent-config with the stored hash: got HTTP %d, want 401", got)
+	}
+	if got, _, _ := ts.status(t, "GET", "/ws?key="+hash, "", nil, ""); got != http.StatusUnauthorized {
+		t.Errorf("/ws with the stored hash: got HTTP %d, want 401", got)
+	}
+}
+
 func TestOperatorKeyOpensTheWebSocket(t *testing.T) {
 	ts := startServer(t)
 	// A plain GET with the operator key passes the key check. The upgrade headers
@@ -117,6 +137,19 @@ func TestAgentCannotRegisterSecrets(t *testing.T) {
 	}
 	if !strings.Contains(string(auditLog), "echo curl was here") {
 		t.Fatalf("the audit log must keep the agent's command: %s", auditLog)
+	}
+}
+
+// An empty process id must not reach the secret store either.
+func TestOperatorInputWithEmptyProcessIDIsRejected(t *testing.T) {
+	ts := startServer(t)
+	code, _, _ := ts.status(t, "POST", "/api/input", ts.opKey, nil, `{"process_id":"","data":"curl\n"}`)
+	if code != http.StatusBadRequest {
+		t.Fatalf("got HTTP %d, want 400", code)
+	}
+	reply := ts.toolCall(t, "shell", map[string]any{"command": "echo curl was here"})
+	if strings.Contains(reply, "[redacted]") {
+		t.Fatalf("an empty process id must not register a secret, got %s", reply)
 	}
 }
 

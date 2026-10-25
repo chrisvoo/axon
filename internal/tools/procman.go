@@ -144,26 +144,23 @@ func (m *ProcManager) SnapshotOutput(id string) string {
 
 // AddSecret hides operator input. Call it before the input is written, so that
 // the terminal echo is never visible. A secret needs a live process: for an
-// unknown or ended process nothing is registered and the result is false. This
-// stops a caller from hiding words of its choice. An empty procID registers a
-// secret that lasts secretTTL.
+// empty id, an unknown process or an ended process nothing is registered and the
+// result is false. This stops a caller from hiding words of its choice.
 func (m *ProcManager) AddSecret(procID, data string) bool {
 	lines := secretLines(data)
-	if len(lines) == 0 {
+	if procID == "" || len(lines) == 0 {
 		return false
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	var expires time.Time // zero: until the process ends
-	if procID == "" {
-		expires = m.now().Add(secretTTL)
-	} else if p, ok := m.procs[procID]; !ok || p.SendInput == nil {
+	if p, ok := m.procs[procID]; !ok || p.SendInput == nil {
 		return false
 	}
+	// The expiry stays zero until the process ends.
 	for _, line := range lines {
-		m.secrets = append(m.secrets, secretEntry{procID, line, expires})
+		m.secrets = append(m.secrets, secretEntry{proc: procID, text: line})
 		if enc := jsonForm(line); enc != line {
-			m.secrets = append(m.secrets, secretEntry{procID, enc, expires})
+			m.secrets = append(m.secrets, secretEntry{proc: procID, text: enc})
 		}
 	}
 	return true

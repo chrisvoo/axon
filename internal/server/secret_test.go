@@ -44,13 +44,13 @@ func startServer(t *testing.T) *testServer {
 
 	dir := t.TempDir()
 	cfg := &config.Config{
-		ListenAddr:    "127.0.0.1",
-		ListenPort:    port,
-		APIKey:        "agent-key",
-		OperatorKey:   "operator-key",
-		ShellTimeout:  "30s",
-		InputStallSec: 1,
-		AuditLog:      filepath.Join(dir, "audit.log"),
+		ListenAddr:      "127.0.0.1",
+		ListenPort:      port,
+		APIKey:          "agent-key",
+		OperatorKeyHash: config.HashKey("operator-key"),
+		ShellTimeout:    "30s",
+		InputStallSec:   1,
+		AuditLog:        filepath.Join(dir, "audit.log"),
 	}
 	deny, err := security.LoadDenylist("")
 	if err != nil {
@@ -71,7 +71,7 @@ func startServer(t *testing.T) *testServer {
 	}()
 	t.Cleanup(func() { cancel(); <-done })
 
-	ts := &testServer{url: fmt.Sprintf("http://127.0.0.1:%d", port), agentKey: cfg.APIKey, opKey: cfg.OperatorKey, audit: cfg.AuditLog, events: sub}
+	ts := &testServer{url: fmt.Sprintf("http://127.0.0.1:%d", port), agentKey: cfg.APIKey, opKey: "operator-key", audit: cfg.AuditLog, events: sub}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if resp, err := http.Get(ts.url + "/health"); err == nil {

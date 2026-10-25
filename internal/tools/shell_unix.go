@@ -20,7 +20,9 @@ func runShellPlatform(ctx context.Context, command string, cmdTimeout, stall tim
 	if _, err := os.Stat(shell); err != nil {
 		shell = "/bin/sh"
 	}
-	c := exec.CommandContext(ctx, shell, "-c", command)
+	// Not CommandContext: ctx ends with the HTTP request, but a command that
+	// returns input_required must outlive it. The loop below cancels on ctx.
+	c := exec.Command(shell, "-c", command)
 	c.Env = os.Environ()
 
 	ptmx, err := pty.Start(c)
@@ -117,7 +119,11 @@ func runShellPlatform(ctx context.Context, command string, cmdTimeout, stall tim
 			}
 			if time.Since(time.Unix(0, lastRead.Load())) >= stall {
 				go func() {
-					<-done
+					select {
+					case <-done:
+					case <-deadline:
+						tp.Cancel()
+					}
 					pm.Remove(id)
 					_ = ptmx.Close()
 				}()

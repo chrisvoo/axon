@@ -367,13 +367,14 @@ func toInt(v any) (int, bool) {
 	}
 }
 
-// isPrivilegedCmd returns true if cmd contains a sudo invocation.
+// isPrivilegedCmd returns true if cmd contains a sudo invocation, including a
+// path-qualified one such as /usr/bin/sudo.
 func isPrivilegedCmd(cmd string) bool {
 	for i := 0; i <= len(cmd)-4; i++ {
 		if cmd[i:i+4] != "sudo" {
 			continue
 		}
-		before := i == 0 || isShellBoundary(cmd[i-1])
+		before := i == 0 || isShellBoundary(cmd[i-1]) || cmd[i-1] == '/'
 		after := i+4 >= len(cmd) || cmd[i+4] == ' ' || cmd[i+4] == '\t' || isShellBoundary(cmd[i+4])
 		if before && after {
 			return true

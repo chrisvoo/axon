@@ -14,7 +14,9 @@ import (
 
 func runShellPlatform(ctx context.Context, command string, cmdTimeout, stall time.Duration, pm *ProcManager) (ShellResult, error) {
 	shell, args := resolveWindowsShell(command)
-	c := exec.CommandContext(ctx, shell, args...)
+	// Not CommandContext: ctx ends with the HTTP request, but a command that
+	// returns input_required must outlive it. The loop below cancels on ctx.
+	c := exec.Command(shell, args...)
 	c.Env = os.Environ()
 	var buf bytes.Buffer
 	c.Stdout = &buf
@@ -102,7 +104,11 @@ func runShellPlatform(ctx context.Context, command string, cmdTimeout, stall tim
 			}
 			if time.Since(time.Unix(0, lastRead.Load())) >= stall {
 				go func() {
-					<-done
+					select {
+					case <-done:
+					case <-deadline:
+						tp.Cancel()
+					}
 					pm.Remove(id)
 					_ = stdin.Close()
 				}()

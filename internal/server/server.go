@@ -35,6 +35,7 @@ type Options struct {
 // Run starts the HTTPS server until context is cancelled.
 func Run(ctx context.Context, cfg *config.Config, deny *security.Denylist, log *audit.Logger, opts Options) error {
 	pm := tools.NewProcManager()
+	log.SetRedactor(pm.Redact)
 	mcpSrv := &mcp.Server{
 		Cfg:     cfg,
 		Deny:    deny,

@@ -34,6 +34,13 @@ describe('InputPrompt', () => {
     expect(screen.getByRole('checkbox', { name: /secret/i })).toBeChecked()
   })
 
+  it('says that hiding the secret is best effort', () => {
+    render(<InputPrompt processId="p1" apiKey="k" />)
+    expect(screen.getByText(/replace it with \[redacted\]/i)).toBeInTheDocument()
+    expect(screen.getByText(/best effort/i)).toBeInTheDocument()
+    expect(screen.getByText(/does not stop a hostile agent/i)).toBeInTheDocument()
+  })
+
   it('shows a plain textarea when Secret is cleared', async () => {
     render(<InputPrompt processId="p1" apiKey="k" />)
     await userEvent.click(screen.getByRole('checkbox', { name: /secret/i }))

@@ -5,6 +5,8 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -218,4 +220,37 @@ func TestRunShell_OperatorSecretNeverReachesTheAgent(t *testing.T) {
 			t.Fatalf("expected got:[redacted], got %q", got.Stdout)
 		}
 	})
+}
+
+// The program writes what the operator typed to a file. The agent then reads
+// that file with a new command. The secret is not tied to the first process.
+func TestRunShell_SecretIsHiddenInAnotherCommand(t *testing.T) {
+	const secret = "hunter2-Zq9"
+	cfg := &config.Config{ShellTimeout: "30s", InputStallSec: 1}
+	pm := NewProcManager()
+	file := filepath.Join(t.TempDir(), "saved.txt")
+
+	res, err := RunShell(context.Background(), cfg, nil, false, `read -r x; printf '%s\n' "$x" > `+file+`; sleep 20`, pm)
+	if err != nil || res.Status != "input_required" {
+		t.Fatalf("expected input_required, got %+v, %v", res, err)
+	}
+	defer func() { _, _ = CancelCommand(res.ProcessID, pm) }()
+	if _, err := SendOperatorInput(res.ProcessID, secret+"\n", true, pm); err != nil {
+		t.Fatal(err)
+	}
+	waitFor(t, "the program to write the file", 5*time.Second, func() bool {
+		b, err := os.ReadFile(file)
+		return err == nil && strings.Contains(string(b), secret)
+	})
+
+	read, err := RunShell(context.Background(), cfg, nil, false, "cat "+file, pm) // the agent
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(read.Stdout, secret) {
+		t.Fatalf("the agent reads the secret with a new command: %q", read.Stdout)
+	}
+	if !strings.Contains(read.Stdout, "[redacted]") {
+		t.Fatalf("expected [redacted], got %q", read.Stdout)
+	}
 }

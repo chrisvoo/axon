@@ -3,7 +3,6 @@ package tools
 import (
 	"bytes"
 	"encoding/json"
-	"reflect"
 	"strings"
 	"testing"
 )
@@ -45,12 +44,10 @@ func decodeResult(t *testing.T, b []byte) map[string]any {
 
 func TestSendOperatorInput_SecretIsRegisteredBeforeTheWrite(t *testing.T) {
 	pm := NewProcManager()
-	var seenAtWrite []string
+	var seenAtWrite string
 	tp := &TrackedProc{ID: "p1", OutBuf: &bytes.Buffer{}}
-	tp.SendInput = func(b []byte) error {
-		tp.OutMu.Lock()
-		seenAtWrite = append([]string(nil), tp.secrets...)
-		tp.OutMu.Unlock()
+	tp.SendInput = func([]byte) error {
+		seenAtWrite = pm.Redact("hunter2")
 		return nil
 	}
 	pm.Put(tp)
@@ -58,7 +55,7 @@ func TestSendOperatorInput_SecretIsRegisteredBeforeTheWrite(t *testing.T) {
 	if _, err := SendOperatorInput("p1", "hunter2\n", true, pm); err != nil {
 		t.Fatal(err)
 	}
-	if !reflect.DeepEqual(seenAtWrite, []string{"hunter2"}) {
+	if seenAtWrite != "[redacted]" {
 		t.Fatalf("the secret must be registered before it is written, got %q", seenAtWrite)
 	}
 }

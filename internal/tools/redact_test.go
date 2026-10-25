@@ -14,6 +14,7 @@ func TestSecretLines(t *testing.T) {
 		{"hunter2", []string{"hunter2"}},
 		{"a b\r\nsecond\n", []string{"a b", "second"}},
 		{"\n\r\n", nil},
+		{"   \n\t\n", nil},
 		{"", nil},
 	}
 	for _, tc := range cases {

@@ -152,14 +152,24 @@ The operator can type a password in the dashboard when a command waits for input
 
 1. The dashboard shows a masked field. The `Secret` box is on by default.
 2. The dashboard sends `POST /api/input` with `secret: true`. The server treats a missing `secret` as `true`.
-3. Axon registers each typed line on the process, then writes the text to the pty. The order matters: no output exists that could show the text before it is registered.
-4. Every output that leaves the process replaces the registered lines with `[redacted]`. This covers the reply to the dashboard, the `send_input` result for the agent, and the stored final result.
-5. The audit log records only the process id. The `dashboard_input` event carries the process id, the IP address and the `secret` flag. Neither carries the text.
+3. Axon registers each typed line in one secret store, then writes the text to the pty. The store belongs to the process manager, not to one process. Each entry lasts 10 minutes. The order matters: no output exists that could show the text before it is registered.
+4. Everything the agent or the dashboard can read passes the store, and the store replaces the text with `[redacted]`:
+   - the output of every `shell` call, also of other commands that run later
+   - the `send_input` result and the stored final result
+   - the result of `read_file`, `grep` and `glob`, and error messages
+   - the details in dashboard events
+   - the audit log
+5. The store also replaces the JSON-escaped form of the text. Output is often encoded after it is built. A quote or a backslash in a password looks different once encoded.
+6. The audit log records only the process id for the operator's input. The `dashboard_input` event carries the process id, the IP address and the `secret` flag. Neither carries the text.
 
-Limits:
+Why one store for all processes: a program can write the text to a file or a log. The agent can read that file with a new command. A store for each process would miss it.
 
-- Axon replaces exact text. A transformed copy of the secret (a hash, base64, or terminal redraw codes inside the text) is not replaced.
-- An agent that can run commands as the Axon user has other ways to read a process, for example `ptrace` or `/proc`. Run Axon as a dedicated user and keep `ptrace_scope` at 1 or higher.
+Limits. The protection is best effort:
+
+- Axon replaces exact text. A changed copy of the secret (a hash, base64, or terminal redraw codes inside the text) is not replaced.
+- The store replaces the text everywhere, also in ordinary output. A short secret such as `root` makes other output hard to read. This is the cost of the `Secret` box.
+- After 10 minutes the text is no longer replaced.
+- A hostile agent that can run commands as the Axon user has other ways to read a process, for example `ptrace` or `/proc`. Run Axon as a dedicated user and keep `ptrace_scope` at 1 or higher. The `Secret` box stops accidental exposure, not an attacker.
 - In tunnel mode, Cloudflare handles the traffic between the browser and Axon.
 - A plain response (the `Secret` box off) reaches the agent on purpose.
 

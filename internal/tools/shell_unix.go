@@ -132,10 +132,10 @@ func runShellPlatform(ctx context.Context, command string, cmdTimeout, stall tim
 						case <-time.After(500 * time.Millisecond):
 						}
 						code := exitCodeOf(waitErr)
-						res = ShellResult{Status: "completed", Stdout: tp.output(), ExitCode: &code, Command: command}
+						res = ShellResult{Status: "completed", Stdout: tp.snapshot(), ExitCode: &code, Command: command}
 					case <-deadline:
 						tp.Cancel()
-						res = ShellResult{Status: "error", ErrorMessage: "command timed out", Stdout: tp.output(), Command: command}
+						res = ShellResult{Status: "error", ErrorMessage: "command timed out", Stdout: tp.snapshot(), Command: command}
 					}
 					pm.Finish(id, res)
 					pm.Remove(id)

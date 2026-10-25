@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"os/exec"
+	"slices"
 	"sync"
 	"time"
 )
@@ -13,12 +14,24 @@ import (
 // input_required stays available to send_input.
 const finishedTTL = 2 * time.Minute
 
+// secretTTL is how long operator input stays hidden. It covers a program that
+// writes the text to a file or log that the agent reads later.
+const secretTTL = 10 * time.Minute
+
 // ProcManager tracks running shell processes for send_input / cancel_command.
+// It also keeps the operator's secrets. They are not tied to one process:
+// any text the agent can read must pass through Redact.
 type ProcManager struct {
 	mu       sync.Mutex
 	procs    map[string]*TrackedProc
 	finished map[string]finishedProc
+	secrets  []secretEntry
 	now      func() time.Time
+}
+
+type secretEntry struct {
+	text    string
+	expires time.Time
 }
 
 type finishedProc struct {
@@ -36,26 +49,14 @@ type TrackedProc struct {
 	OutBuf    *bytes.Buffer
 	OutMu     sync.Mutex
 	CreatedAt time.Time
-
-	// secrets is input typed by the operator that must never appear in any
-	// output. Guarded by OutMu.
-	secrets []string
 }
 
-// addSecret registers operator input so that output never shows it.
-func (p *TrackedProc) addSecret(data string) {
-	lines := secretLines(data)
-	p.OutMu.Lock()
-	p.secrets = append(p.secrets, lines...)
-	p.OutMu.Unlock()
-}
-
-// output returns the output so far with every operator secret replaced.
-// All output that leaves the process (agent, dashboard) must come from here.
-func (p *TrackedProc) output() string {
+// snapshot returns the raw output so far. It may hold operator secrets, so it
+// must go through ProcManager.Redact before it leaves the process.
+func (p *TrackedProc) snapshot() string {
 	p.OutMu.Lock()
 	defer p.OutMu.Unlock()
-	return redact(p.OutBuf.String(), p.secrets)
+	return p.OutBuf.String()
 }
 
 type contextCancel func()
@@ -135,15 +136,50 @@ func (m *ProcManager) SnapshotOutput(id string) string {
 	if p == nil {
 		return ""
 	}
-	return p.output()
+	return m.Redact(p.snapshot())
 }
 
-// AddSecret registers operator input for a process. Call it before the input
-// is written, so that the terminal echo is never visible.
-func (m *ProcManager) AddSecret(id, data string) {
-	if p := m.Get(id); p != nil {
-		p.addSecret(data)
+// AddSecret hides operator input for secretTTL. Call it before the input is
+// written, so that the terminal echo is never visible.
+func (m *ProcManager) AddSecret(data string) {
+	lines := secretLines(data)
+	if len(lines) == 0 {
+		return
 	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	expires := m.now().Add(secretTTL)
+	for _, line := range lines {
+		m.secrets = append(m.secrets, secretEntry{line, expires})
+		if enc := jsonForm(line); enc != line {
+			m.secrets = append(m.secrets, secretEntry{enc, expires})
+		}
+	}
+}
+
+// Redact replaces every active operator secret in s. A nil manager returns s.
+func (m *ProcManager) Redact(s string) string {
+	if m == nil {
+		return s
+	}
+	m.mu.Lock()
+	now := m.now()
+	m.secrets = slices.DeleteFunc(m.secrets, func(e secretEntry) bool { return !now.Before(e.expires) })
+	active := make([]string, len(m.secrets))
+	for i, e := range m.secrets {
+		active[i] = e.text
+	}
+	m.mu.Unlock()
+	return redact(s, active)
+}
+
+// redactResult hides secrets in the output fields of a shell result. The
+// command is the agent's own text and stays as it is.
+func (m *ProcManager) redactResult(r ShellResult) ShellResult {
+	r.Stdout = m.Redact(r.Stdout)
+	r.Stderr = m.Redact(r.Stderr)
+	r.LastOutput = m.Redact(r.LastOutput)
+	return r
 }
 
 // Remove deletes a process id.

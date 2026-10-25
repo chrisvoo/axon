@@ -13,7 +13,7 @@ The code is careful in many small places. The main risks come from the design, n
 3. The server has no request limits and no timeouts. It listens on all interfaces by default.
 4. The default TLS setup leads users to turn off certificate checks.
 
-The operator-secret path (a password typed in the dashboard) is now protected. The agent, the dashboard output, the audit log and the events do not contain the text. Tests cover this. The limits are listed in section 3.
+The operator-secret path (a password typed in the dashboard) is protected on a best-effort basis. A shared secret store replaces the text in everything the agent can read, in the dashboard events and in the audit log. Tests cover this. The limits are listed in section 3. They matter: the protection stops accidental exposure, not a hostile agent.
 
 ## How I checked
 
@@ -91,23 +91,28 @@ Severity: **High** can lead to full compromise or loss of audit trust. **Medium*
 
 ## 3. The operator-secret path
 
-What the code now guarantees, with tests:
+What the code guarantees, with tests:
 
 | Channel | Result |
 |---|---|
-| Agent view (`send_input`) | The typed text shows as `[redacted]`. |
-| Stored final result | The same. |
-| Reply to the dashboard | The same. |
-| Dashboard events | The `dashboard_input` event has the process id, the IP and the `secret` flag. It has no text. |
-| Audit log and server log | No text. |
+| `shell` results, including later commands that print or read the text | `[redacted]` |
+| `send_input` and the stored final result | `[redacted]` |
+| `read_file`, `grep`, `glob` and error messages | `[redacted]` |
+| Reply to the dashboard | `[redacted]` |
+| Dashboard events (details and output previews) | `[redacted]`. The `dashboard_input` event has the process id, the IP and the `secret` flag, no text. |
+| Audit log and server log | `[redacted]` in the detail. No input text. |
 | Browser | The field is masked, `autocomplete="new-password"`. The text is cleared after sending. It is not stored. |
 
-The server treats a missing `secret` flag as `true`.
+How it works: one secret store on the process manager. It holds each typed line and its JSON-escaped form for 10 minutes. The text is registered before it is written to the pty. The server treats a missing `secret` flag as `true`.
 
-Limits:
+Why the store is shared: a review of the first version found that a store for each process missed a program that writes the text to a file. The agent could then read the file with `cat` or `read_file`. A test now covers this case.
 
-- **Exact text only.** A transformed copy is not replaced: a hash, base64, or a terminal that redraws the line with control codes.
-- **Same-user access.** The agent runs as the Axon user. It can try `ptrace`, `/proc` or other tools on the target process. On Linux, keep `kernel.yama.ptrace_scope` at 1 or higher and run Axon as a dedicated user. I did not test this on Linux.
+Limits. The protection is best effort:
+
+- **Exact text only.** A changed copy is not replaced: a hash, base64, or a terminal that redraws the line with control codes.
+- **Over-redaction.** The store replaces the text in all output. A short secret such as `root` also replaces ordinary words. The operator chooses this with the `Secret` box.
+- **Time limit.** After 10 minutes the text is no longer replaced.
+- **Same-user access.** A hostile agent runs as the Axon user. It can try `ptrace`, `/proc` or other tools on the target process. On Linux, keep `kernel.yama.ptrace_scope` at 1 or higher and run Axon as a dedicated user. I did not test this on Linux.
 - **Tunnel.** Cloudflare ends the TLS connection. The browser's request, with the password, passes through its network.
 - **Plain responses.** With the `Secret` box off, the agent sees the text on purpose.
 - **Prompts that show typing.** The echo is replaced, so the agent sees `[redacted]` where the text was.

@@ -108,7 +108,7 @@ export function InputPrompt({ processId, apiKey, hint, mockApi }: Props) {
             className="mt-0.5"
           />
           <span>
-            Secret. Mask it and hide it from the agent. Clear the box for a plain response that the agent may see.
+            Secret. Mask it and replace it with [redacted] in everything the agent can read. Best effort: this does not stop a hostile agent. Clear the box for a plain response that the agent may see.
           </span>
         </label>
         {error ? <p className="text-sm text-red-400">{error}</p> : null}

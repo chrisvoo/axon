@@ -189,3 +189,60 @@ func TestOperatorPlainResponseStaysVisible(t *testing.T) {
 	}
 	t.Fatal("a plain response should reach the agent")
 }
+
+// A secret typed into one command must be hidden in every other channel the
+// agent can read, including JSON-encoded output, errors, events and the audit log.
+func TestSecretIsHiddenInEveryAgentVisibleChannel(t *testing.T) {
+	const secret = `hu"nt\er2<Zq9`
+	ts := startServer(t)
+	dir := t.TempDir()
+	saved := filepath.Join(dir, "saved.txt")
+	if err := os.WriteFile(saved, []byte("password="+secret+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	pid := processID(t, ts.toolCall(t, "shell", map[string]any{"command": "read -r x; sleep 20"}))
+	defer ts.toolCall(t, "cancel_command", map[string]any{"process_id": pid})
+	ts.post(t, "/api/input", map[string]any{"process_id": pid, "data": secret + "\n"})
+
+	replies := map[string]string{
+		"read_file": ts.toolCall(t, "read_file", map[string]any{"path": saved}),
+		"grep":      ts.toolCall(t, "grep", map[string]any{"root": dir, "pattern": "password"}),
+		"error":     ts.toolCall(t, "read_file", map[string]any{"path": filepath.Join(dir, secret)}),
+		"shell":     ts.toolCall(t, "shell", map[string]any{"command": "cat " + saved}),
+		// The agent puts the text in its own command, for example after it learned it elsewhere.
+		"own command": ts.toolCall(t, "shell", map[string]any{"command": "echo '" + secret + "'"}),
+	}
+
+	all := make([]string, 0, len(replies)+2)
+	for name, reply := range replies {
+		all = append(all, reply)
+		if !strings.Contains(reply, "[redacted]") {
+			t.Errorf("%s: expected [redacted] in %s", name, reply)
+		}
+	}
+	for {
+		select {
+		case e := <-ts.events:
+			b, _ := json.Marshal(e)
+			all = append(all, string(b))
+			continue
+		default:
+		}
+		break
+	}
+	auditLog, err := os.ReadFile(ts.audit)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all = append(all, string(auditLog))
+
+	forms := []string{secret, `hu\"nt\\er2<Zq9`, "Zq9"}
+	for i, text := range all {
+		for _, form := range forms {
+			if strings.Contains(text, form) {
+				t.Fatalf("the secret leaks as %q (item %d): %s", form, i, text)
+			}
+		}
+	}
+}

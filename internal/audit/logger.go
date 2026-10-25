@@ -52,6 +52,9 @@ func (l *Logger) Log(e Entry) {
 	if l == nil || l.path == "" {
 		return
 	}
+	if e.Time.IsZero() {
+		e.Time = time.Now()
+	}
 	e.Time = e.Time.UTC()
 	l.mu.Lock()
 	defer l.mu.Unlock()

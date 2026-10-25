@@ -3,6 +3,7 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"os/exec"
 	"time"
 
 	"github.com/chrisvoo/axon/internal/config"
@@ -42,6 +43,17 @@ func RunShell(ctx context.Context, cfg *config.Config, deny *security.Denylist, 
 // ShellResultJSON returns JSON bytes for MCP content.
 func ShellResultJSON(r ShellResult) ([]byte, error) {
 	return json.Marshal(r)
+}
+
+// exitCodeOf returns the exit code of a finished process; -1 if it did not exit normally.
+func exitCodeOf(waitErr error) int {
+	if waitErr == nil {
+		return 0
+	}
+	if exitErr, ok := waitErr.(*exec.ExitError); ok {
+		return exitErr.ExitCode()
+	}
+	return -1
 }
 
 // tailLines returns the last maxLines lines of s.

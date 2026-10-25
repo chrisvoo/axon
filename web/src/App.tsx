@@ -28,7 +28,7 @@ function mergeRow(
   return { ...base, ...patch, callId: patch.callId }
 }
 
-function reduceActivity(rows: Map<string, ActivityRow>, event: AxonEvent): Map<string, ActivityRow> {
+export function reduceActivity(rows: Map<string, ActivityRow>, event: AxonEvent): Map<string, ActivityRow> {
   const next = new Map(rows)
   const d = event.data ?? {}
 
@@ -58,7 +58,10 @@ function reduceActivity(rows: Map<string, ActivityRow>, event: AxonEvent): Map<s
       }
       const prev = next.get(callId)
       const ok = d.ok !== false && d.is_error !== true
-      const status: ActivityStatus = ok ? 'done' : 'error'
+      // The server publishes input_required before tool_result for the same call.
+      // A command that waits for input is not done, and the prompt must stay visible.
+      const waiting = ok && d.shell_status === 'input_required'
+      const status: ActivityStatus = !ok ? 'error' : waiting ? 'waiting_input' : 'done'
       next.set(
         callId,
         mergeRow(prev, {

@@ -104,7 +104,7 @@ func (s *Server) handleToolsList(w http.ResponseWriter, req jsonRPCRequest) {
 			"pattern": map[string]any{"type": "string"},
 		}),
 		toolDef("system_info", "Host, CPU, memory, disk summary", map[string]any{}),
-		toolDef("send_input", "Send stdin to a process waiting for input", map[string]any{
+		toolDef("send_input", "Send stdin to a process waiting for input. If the process already ended (for example the operator answered in the dashboard), returns its final result: status, output and exit code. Call with empty data to read it. The result stays available for 2 minutes.", map[string]any{
 			"process_id": map[string]any{"type": "string"},
 			"data":       map[string]any{"type": "string"},
 		}),

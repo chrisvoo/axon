@@ -127,13 +127,17 @@ func Run(ctx context.Context, cfg *config.Config, deny *security.Denylist, log *
 		var body struct {
 			ProcessID string `json:"process_id"`
 			Data      string `json:"data"`
+			// Secret defaults to true: operator input is hidden from the agent
+			// unless the dashboard says it is a plain response.
+			Secret *bool `json:"secret"`
 		}
 		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
 			http.Error(w, "invalid json", http.StatusBadRequest)
 			return
 		}
+		secret := body.Secret == nil || *body.Secret
 		mcpSrv.Audit.Log(audit.Entry{RemoteIP: remoteIP, Action: "send_input", Detail: body.ProcessID + " (dashboard)"})
-		b, err := tools.SendInput(body.ProcessID, body.Data, pm)
+		b, err := tools.SendOperatorInput(body.ProcessID, body.Data, secret, pm)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -144,6 +148,7 @@ func Run(ctx context.Context, cfg *config.Config, deny *security.Denylist, log *
 				Data: map[string]any{
 					"process_id": body.ProcessID,
 					"remote_ip":  remoteIP,
+					"secret":     secret,
 				},
 			})
 		}

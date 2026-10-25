@@ -21,6 +21,7 @@ Axon is a standalone Go agent. It exposes an [MCP](https://modelcontextprotocol.
 - Optional IP allowlist and per-IP rate limiting
 - Command denylist and read-only mode
 - Interactive commands: a command that waits for input returns `input_required`. Use `send_input` or `cancel_command` to continue.
+- Secret input: a password that you type in the dashboard goes to the command only. The agent, the dashboard output and the logs show `[redacted]` instead.
 - Audit log (JSON lines) for every tool call
 - Web dashboard with a live view of agent activity
 - Refuses to run as root. Commands that contain `sudo` never run. The dashboard shows them so that you can run them yourself.
@@ -202,6 +203,7 @@ Axon merges `~/.axon/config.yaml` over the built-in defaults.
 - Treat the API key like a password. Rotate it with `axon keygen` if it leaks.
 - Run Axon as an unprivileged user that has no passwordless `sudo`. The denylist and the `sudo` check are guardrails, not a sandbox. A client can bypass them, for example with `/usr/bin/sudo` or by writing a script and running it.
 - The file tools can reach every path that the Axon user can reach.
+- Secret input is hidden by exact-text replacement. It does not stop a client that runs other commands as the Axon user. It does not hide a transformed copy of the secret (for example a hash). In tunnel mode, Cloudflare handles the traffic between your browser and Axon, so a secret passes through its network.
 - In tunnel mode, every request comes from `127.0.0.1`. `ip_allowlist` and the per-IP rate limit cannot tell clients apart.
 - Prefer a VPN or an SSH tunnel if you cannot expose a port safely.
 - Review and extend `~/.axon/denylist.txt` for your environment.

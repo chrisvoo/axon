@@ -20,3 +20,4 @@ web/dist/
 # AI
 /.claude/settings.json
 /.claude/settings.local.json
+.mcp.json

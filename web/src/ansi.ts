@@ -22,6 +22,26 @@ function tryPrettyJson(s: string): string {
   return s
 }
 
+// The server previews a shell result as its JSON envelope, cut at 8000 bytes. Only the
+// output keys are useful to read, so pull them out. A cut envelope is not valid JSON,
+// so each key is read with a regex that accepts a missing closing quote.
+const OUTPUT_KEYS = ['stdout', 'stderr', 'last_output', 'error'] as const
+
+function readJsonString(text: string, key: string): string | undefined {
+  const m = new RegExp(`"${key}"\\s*:\\s*"((?:[^"\\\\]|\\\\.)*)("?)`).exec(text)
+  if (!m) return undefined
+  let body = m[1]
+  if (!m[2]) body = body.replace(/\\u[0-9a-fA-F]{0,3}$/, '').replace(/\\$/, '')
+  try { return JSON.parse(`"${body}"`) } catch { return body }
+}
+
+export function extractShellOutput(preview: string): string {
+  const t = preview.trim()
+  if (!t.startsWith('{')) return preview
+  const parts = OUTPUT_KEYS.map((k) => readJsonString(t, k)).filter((v): v is string => !!v)
+  return parts.length ? parts.join('\n') : preview
+}
+
 export function parseAnsi(raw: string): AnsiSpan[] {
   const cleaned = tryPrettyJson(raw)
   const normalized = cleaned.split('\n').map(processLine).join('\n')

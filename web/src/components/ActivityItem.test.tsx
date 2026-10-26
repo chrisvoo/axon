@@ -62,24 +62,27 @@ describe('ActivityItem', () => {
     expect(screen.getByText('hello output')).toBeInTheDocument()
   })
 
-  it('shows "Show more" when the preview exceeds 10 lines', () => {
-    const longOutput = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`).join('\n')
+  it('scrolls a long output instead of truncating it', () => {
+    const longOutput = Array.from({ length: 50 }, (_, i) => `line ${i + 1}`).join('\n')
     render(<ActivityItem row={{ ...BASE_ROW, outputPreview: longOutput }} apiKey="k" />)
-    expect(screen.getByRole('button', { name: /show more/i })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument()
+    expect(screen.getByTestId('output')).toHaveClass('max-h-80', 'overflow-auto')
+    expect(screen.getByTestId('output').textContent).toContain('line 50')
   })
 
-  it('does not show "Show more" when the preview is ≤10 lines', () => {
-    const shortOutput = Array.from({ length: 8 }, (_, i) => `line ${i + 1}`).join('\n')
-    render(<ActivityItem row={{ ...BASE_ROW, outputPreview: shortOutput }} apiKey="k" />)
-    expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument()
+  it('shows only the stdout of a shell envelope', () => {
+    const envelope = JSON.stringify({ status: 'completed', stdout: 'a\n  b', exit_code: 0, command: 'ls' }, null, 2)
+    render(<ActivityItem row={{ ...BASE_ROW, shellStatus: 'completed', outputPreview: envelope }} apiKey="k" />)
+    expect(screen.getByTestId('output').textContent).toBe('a\n  b')
   })
 
-  it('expands the full preview after clicking "Show more"', async () => {
-    const lines = Array.from({ length: 12 }, (_, i) => `line ${i + 1}`)
-    render(<ActivityItem row={{ ...BASE_ROW, outputPreview: lines.join('\n') }} apiKey="k" />)
-    await userEvent.click(screen.getByRole('button', { name: /show more/i }))
-    expect(screen.queryByRole('button', { name: /show more/i })).not.toBeInTheDocument()
-    expect(screen.getByText(/line 12/)).toBeInTheDocument()
+  it('keeps a long command on one line with a horizontal scrollbar', () => {
+    const cmd = 'echo ' + 'x'.repeat(500)
+    render(<ActivityItem row={{ ...BASE_ROW, detail: cmd }} apiKey="k" />)
+    const el = screen.getByTestId('command')
+    expect(el).toHaveClass('overflow-x-auto', 'whitespace-nowrap')
+    expect(el).not.toHaveClass('truncate')
+    expect(el.textContent).toBe(cmd)
   })
 
   it('collapses the body when the header button is clicked', async () => {

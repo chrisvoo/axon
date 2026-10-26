@@ -199,14 +199,15 @@ export default function App() {
   }
 
   return (
-    <div className="flex min-h-screen flex-col lg:flex-row">
+    // The page never scrolls: the sidebar stays put and only the activity list scrolls.
+    <div className="flex h-screen flex-col overflow-hidden lg:flex-row">
       {privilegedModal && (
         <PrivilegedModal
           commands={privilegedModal.commands}
           onClose={() => setPrivilegedModal(null)}
         />
       )}
-      <aside className="flex w-full flex-col gap-4 border-b border-zinc-800 p-4 lg:w-80 lg:border-b-0 lg:border-r">
+      <aside className="flex max-h-[40vh] w-full shrink-0 flex-col gap-4 overflow-y-auto border-b border-zinc-800 p-4 lg:max-h-none lg:w-80 lg:border-b-0 lg:border-r">
         <div>
           <div className="text-lg font-semibold text-white">Axon</div>
           <p className="text-xs text-zinc-500">Remote agent dashboard</p>
@@ -232,7 +233,7 @@ export default function App() {
           </button>
         )}
       </aside>
-      <main className="flex min-h-0 flex-1 flex-col p-4">
+      <main className="flex min-h-0 min-w-0 flex-1 flex-col p-4">
         <ActivityLog
           items={sortedItems}
           apiKey={apiKey}

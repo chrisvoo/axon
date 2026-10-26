@@ -10,6 +10,15 @@ function uid() {
   return Math.random().toString(36).slice(2, 10)
 }
 
+// The server previews a shell result as its JSON envelope; the dashboard shows only stdout.
+function shellEnvelope(command: string, stdout: string, exitCode = 0) {
+  return JSON.stringify(
+    { status: 'completed', stdout, exit_code: exitCode, command },
+    null,
+    2,
+  )
+}
+
 // Exercises ANSI color codes, bold, and reset sequences
 const ANSI_GIT_LOG = [
   '\x1b[33mcommit a1b2c3d4e5f6a7b8c9d0e1f2a3b4c5d6e7f8a9b0\x1b[0m \x1b[1m(HEAD -> main, origin/main)\x1b[0m',
@@ -85,8 +94,8 @@ export const SCENARIOS: Scenario[] = [
             tool: 'shell_exec',
             ok: true,
             duration_ms: 38,
-            output_preview: ANSI_GIT_LOG,
-            shell_status: 'exited',
+            output_preview: shellEnvelope('git log --color=always -10', ANSI_GIT_LOG),
+            shell_status: 'completed',
             exit_code: 0,
           },
         },
@@ -110,8 +119,34 @@ export const SCENARIOS: Scenario[] = [
             tool: 'shell_exec',
             ok: true,
             duration_ms: 3821,
-            output_preview: LONG_SHARD_OUTPUT,
-            shell_status: 'exited',
+            output_preview: shellEnvelope('process-shards --all --verbose', LONG_SHARD_OUTPUT),
+            shell_status: 'completed',
+            exit_code: 0,
+          },
+        },
+      ]
+    },
+  },
+  {
+    label: 'shell_exec — very long command (horizontal scroll)',
+    kind: 'normal',
+    build: () => {
+      const callId = uid()
+      const command =
+        'cd /var/www/app && export GIT_PAGER=cat && ps -o pid,etime,cmd -C less; echo ---A; ' +
+        'git log --no-merges --format=\'%ad %s\' --date=short main..custom | head -40; echo ---B; ' +
+        'for b in main custom custom_v6 custom-v2; do echo "$b: tag=$(git describe --tags --abbrev=0 $b 2>/dev/null)"; done'
+      return [
+        { type: 'tool_called', data: { call_id: callId, tool: 'shell_exec', detail: command, remote_ip: '127.0.0.1' } },
+        {
+          type: 'tool_result',
+          data: {
+            call_id: callId,
+            tool: 'shell_exec',
+            ok: true,
+            duration_ms: 147,
+            output_preview: shellEnvelope(command, '  PID     ELAPSED CMD\n---A\n2025-01-01 Printing exception messages\n---B\nmain: tag=v9.11.1\ncustom: tag=v7.2.0\n'),
+            shell_status: 'completed',
             exit_code: 0,
           },
         },
@@ -159,8 +194,8 @@ export const SCENARIOS: Scenario[] = [
             ok: false,
             is_error: true,
             duration_ms: 1247,
-            output_preview: TEST_FAILURE_OUTPUT,
-            shell_status: 'exited',
+            output_preview: shellEnvelope('go test ./internal/security/...', TEST_FAILURE_OUTPUT, 1),
+            shell_status: 'completed',
             exit_code: 1,
           },
         },

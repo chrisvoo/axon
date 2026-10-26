@@ -170,6 +170,7 @@ cd web && VITE_DEMO_MODE=true pnpm dev
 | `axon serve -tunnel` | Start a Cloudflare quick tunnel (implies `-dev`) |
 | `axon serve -tunnel-name N -tunnel-url U` | Start a named Cloudflare tunnel (implies `-dev`) |
 | `axon serve -addr A -port P` | Override the listen address and port |
+| `axon serve -claude` / `-cursor` | Print only the Claude Code (default) or the Cursor setup. Use both flags for both |
 | `axon serve -no-browser` | Do not open the dashboard |
 | `axon status` | Show the config paths and the certificate fingerprint |
 | `axon keygen` | Rotate the API key (restart `axon serve` to apply it) |

@@ -82,30 +82,17 @@ func printCursorSection(mcpJSON, deeplink string) {
 
 // printClaudeSection prints Claude Code-specific MCP setup instructions.
 // mcpURL is the final MCP endpoint; apiKey is the raw token.
-func printClaudeSection(mcpURL, apiKey, settingsJSON string) {
+func printClaudeSection(mcpURL, apiKey, mcpJSON string) {
 	printSectionHeader("Claude Code")
 
-	fmt.Printf("  %s\n", dimStyle.Render("Set these environment variables (add to ~/.zshrc or ~/.bashrc):"))
+	fmt.Printf("  %s\n", dimStyle.Render("Add to .mcp.json in the root of your project:"))
+	indentBlock(mcpJSON)
+	fmt.Printf("  %s\n\n", yellowStyle.Render("Contains the API key: add .mcp.json to .gitignore, do not commit it."))
 
-	urlLine := greenStyle.Render(`  export AXON_MCP_URL="`) + cyanStyle.Render(mcpURL) + greenStyle.Render(`"`)
-	tokenLine := greenStyle.Render(`  export AXON_MCP_TOKEN="`) + cyanStyle.Render(apiKey) + greenStyle.Render(`"`)
-
-	fmt.Println(urlLine)
-	fmt.Println(tokenLine)
-	fmt.Println()
-
-	fmt.Printf("  %s\n", dimStyle.Render("Then add to .claude/settings.json in your project (key never hard-coded):"))
-	indentBlock(settingsJSON)
-	fmt.Println()
-
-	fmt.Printf("  %s\n", dimStyle.Render("Or register via CLI (one-time):"))
-
-	cliLine1 := greenStyle.Render(`  claude mcp add axon --transport http "`) + cyanStyle.Render(mcpURL) + greenStyle.Render(`" \`)
-	cliLine2 := greenStyle.Render(`    -H "Authorization: Bearer `) + cyanStyle.Render(apiKey) + greenStyle.Render(`"`)
-
-	fmt.Println(cliLine1)
-	fmt.Println(cliLine2)
-	fmt.Println()
+	fmt.Printf("  %s\n", dimStyle.Render("Or let the CLI write that same .mcp.json (run it in the project root):"))
+	fmt.Println(greenStyle.Render(`  claude mcp add axon --scope project --transport http "`) + cyanStyle.Render(mcpURL) + greenStyle.Render(`" \`))
+	fmt.Println(greenStyle.Render(`    --header "Authorization: Bearer `) + cyanStyle.Render(apiKey) + greenStyle.Render(`"`))
+	fmt.Printf("  %s\n\n", dimStyle.Render("Without --scope project the CLI writes to ~/.claude.json instead."))
 }
 
 func indentBlock(s string) {

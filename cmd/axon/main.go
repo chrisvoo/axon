@@ -25,7 +25,7 @@ import (
 	"github.com/chrisvoo/axon/internal/update"
 )
 
-const version = "1.0.0" // semantic version: see "Versioning" in CLAUDE.md
+const version = "1.1.0" // semantic version: see "Versioning" in CLAUDE.md
 
 // Specific styles for main.go (reuses cyanStyle, dimStyle, boldStyle from startup.go)
 var (
@@ -86,6 +86,8 @@ Commands:
                   (requires -tunnel-name; implies -dev)
     -addr         Override listen address
     -port         Override listen port
+    -claude       Print only the Claude Code setup (default)
+    -cursor       Print only the Cursor setup; with -claude, print both
     -no-browser   Do not open the dashboard in a browser
   status          Show configuration paths and certificate fingerprint
   keygen          Rotate the API key (the agent's key)
@@ -152,7 +154,10 @@ func cmdServe() error {
 	useTunnel := fs.Bool("tunnel", false, "start a Cloudflare quick tunnel and print the public mcp.json snippet (implies -dev)")
 	tunnelName := fs.String("tunnel-name", "", "named Cloudflare tunnel to run (requires -tunnel-url)")
 	tunnelURL := fs.String("tunnel-url", "", "public URL of the named tunnel, e.g. https://axon.example.com (requires -tunnel-name)")
+	claude := fs.Bool("claude", false, "print only the Claude Code setup (default when no client flag is set)")
+	cursor := fs.Bool("cursor", false, "print only the Cursor setup (combine with -claude for both)")
 	_ = fs.Parse(os.Args[2:])
+	clients := clientSet{claude: *claude || !*cursor, cursor: *cursor}
 
 	if (*tunnelName == "") != (*tunnelURL == "") {
 		return fmt.Errorf("-tunnel-name and -tunnel-url must be used together")
@@ -203,17 +208,7 @@ func cmdServe() error {
 		case useNamedTunnel:
 			mcpURL := *tunnelURL + "/mcp"
 			fmt.Printf("  %s Named Cloudflare Tunnel: %s\n\n", boldStyle.Render("☁"), cyanStyle.Render(*tunnelURL))
-			printCursorSection(
-				server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey),
-				func() string {
-					dl, err := server.CursorMCPInstallDeeplink("axon", mcpURL, cfg.APIKey)
-					if err != nil {
-						return ""
-					}
-					return dl
-				}(),
-			)
-			printClaudeSection(mcpURL, cfg.APIKey, server.ClaudeCodeMCPConfig(mcpURL))
+			printClients(clients, mcpURL, cfg.APIKey, server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey), true)
 			fmt.Printf("  Starting named tunnel %q…\n\n", *tunnelName)
 			go func() {
 				if err := tunnel.StartNamedTunnel(ctx, *tunnelName); err != nil && ctx.Err() == nil {
@@ -228,17 +223,7 @@ func cmdServe() error {
 				err := tunnel.StartTrycloudflare(ctx, localURL, func(publicURL string) {
 					mcpURL := publicURL + "/mcp"
 					fmt.Printf("\n  %s Cloudflare Tunnel ready: %s\n\n", boldStyle.Render("☁"), cyanStyle.Render(publicURL))
-					printCursorSection(
-						server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey),
-						func() string {
-							dl, e := server.CursorMCPInstallDeeplink("axon", mcpURL, cfg.APIKey)
-							if e != nil {
-								return ""
-							}
-							return dl
-						}(),
-					)
-					printClaudeSection(mcpURL, cfg.APIKey, server.ClaudeCodeMCPConfig(mcpURL))
+					printClients(clients, mcpURL, cfg.APIKey, server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey), true)
 				})
 				if err != nil && ctx.Err() == nil {
 					fmt.Fprintf(os.Stderr, "\ncloudflared error: %v\n", err)
@@ -247,11 +232,7 @@ func cmdServe() error {
 
 		default:
 			mcpURL := fmt.Sprintf("http://%s:%d/mcp", cfg.ListenAddr, cfg.ListenPort)
-			printCursorSection(
-				server.PrettyMCPDevConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey),
-				"",
-			)
-			printClaudeSection(mcpURL, cfg.APIKey, server.ClaudeCodeMCPConfig(mcpURL))
+			printClients(clients, mcpURL, cfg.APIKey, server.PrettyMCPDevConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey), false)
 		}
 
 		if !*noBrowser {
@@ -284,13 +265,7 @@ func cmdServe() error {
 		fmt.Sprintf("  %s %s", boldStyle.Render("TLS fingerprint:"), dimStyle.Render(fp)),
 	)
 
-	deep, err := server.CursorMCPInstallDeeplink("axon", mcpURL, cfg.APIKey)
-	deeplink := ""
-	if err == nil {
-		deeplink = deep
-	}
-	printCursorSection(server.PrettyMCPConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey), deeplink)
-	printClaudeSection(mcpURL, cfg.APIKey, server.ClaudeCodeMCPConfig(mcpURL))
+	printClients(clients, mcpURL, cfg.APIKey, server.PrettyMCPConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey), true)
 
 	if !*noBrowser {
 		go openBrowser(dashboardURL)
@@ -301,6 +276,23 @@ func cmdServe() error {
 		Events:  bus,
 		Hub:     h,
 	})
+}
+
+// clientSet selects which MCP client setups `serve` prints.
+type clientSet struct{ claude, cursor bool }
+
+// printClients prints the setup of the selected clients. deeplink adds Cursor's one-click link.
+func printClients(c clientSet, mcpURL, apiKey, cursorJSON string, deeplink bool) {
+	if c.cursor {
+		dl := ""
+		if deeplink {
+			dl, _ = server.CursorMCPInstallDeeplink("axon", mcpURL, apiKey)
+		}
+		printCursorSection(cursorJSON, dl)
+	}
+	if c.claude {
+		printClaudeSection(mcpURL, apiKey, server.ClaudeCodeMCPConfig(mcpURL, apiKey))
+	}
 }
 
 func openBrowser(url string) {

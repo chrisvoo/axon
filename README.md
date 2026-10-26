@@ -52,6 +52,23 @@ go build -o axon ./cmd/axon   # uses the committed dashboard build
 make build                    # also rebuilds the dashboard (needs pnpm)
 ```
 
+### Update
+
+On a host built from a clone, `axon update` brings it up to date:
+
+```bash
+axon update -check   # show what would change, change nothing
+axon update          # pull, rebuild what is stale, replace the binary
+```
+
+It does this:
+
+1. Fetches `origin` and rebases the checkout onto its upstream branch. If a local commit conflicts, it aborts the rebase and stops. `-force` drops local changes and commits and resets to upstream.
+2. Compares the changed files with the commit that the running binary was built from. A Go source, `go.mod`, `go.sum` or committed dashboard change rebuilds the binary. A `web/` change without a new committed `internal/dashboard/dist` rebuilds the dashboard first (`make web`, needs `pnpm`). Without `make` or `pnpm`, it warns and uses the committed dashboard. A docs-only pull builds nothing.
+3. Builds to `axon.new` next to the binary and renames it over the running one.
+
+It does not restart `axon serve`: restart it to run the new build. It works on Linux and macOS, from a git clone only (not from `go install` or the install script).
+
 ## Quick start
 
 On the remote machine:
@@ -171,6 +188,10 @@ cd web && VITE_DEMO_MODE=true pnpm dev
 | `axon status` | Show the config paths and the certificate fingerprint |
 | `axon keygen` | Rotate the API key (restart `axon serve` to apply it) |
 | `axon keygen -operator` | Make a new operator key and show it once (restart `axon serve` to apply it) |
+| `axon update` | Pull the latest source and rebuild what is stale (restart `axon serve` to apply it) |
+| `axon update -check` | Show what an update would change, and change nothing |
+| `axon update -force` | Update and discard local changes and commits |
+| `axon update -repo PATH` | Use this checkout (default: found from the binary or the current directory) |
 | `axon version` | Print the version |
 
 ## Configuration

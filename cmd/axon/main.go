@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"syscall"
 
@@ -21,9 +22,10 @@ import (
 	"github.com/chrisvoo/axon/internal/security"
 	"github.com/chrisvoo/axon/internal/server"
 	"github.com/chrisvoo/axon/internal/tunnel"
+	"github.com/chrisvoo/axon/internal/update"
 )
 
-const version = "0.1.0"
+const version = "1.0.0" // semantic version: see "Versioning" in CLAUDE.md
 
 // Specific styles for main.go (reuses cyanStyle, dimStyle, boldStyle from startup.go)
 var (
@@ -56,6 +58,11 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
+	case "update":
+		if err := cmdUpdate(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
 	case "version", "-v", "--version":
 		fmt.Println(version)
 	default:
@@ -83,6 +90,10 @@ Commands:
   status          Show configuration paths and certificate fingerprint
   keygen          Rotate the API key (the agent's key)
     -operator     Rotate the operator key (the dashboard's key) instead; shows it once
+  update          Pull the latest source and rebuild what is stale (binary, dashboard)
+    -check        Only report what would change
+    -force        Discard local changes and local commits (default: stop on conflicts)
+    -repo         Path of the source checkout (default: found from the binary or the current directory)
   version         Print version
 
 `, version)
@@ -373,6 +384,42 @@ func cmdKeygen() error {
 	}
 	fmt.Printf("New API key: %s\n", k)
 	return nil
+}
+
+func cmdUpdate() error {
+	if err := rootcheck.EnsureNotRoot(); err != nil {
+		return err
+	}
+	fs := flag.NewFlagSet("update", flag.ContinueOnError)
+	check := fs.Bool("check", false, "only report what would change")
+	force := fs.Bool("force", false, "discard local changes and local commits")
+	repo := fs.String("repo", "", "path of the source checkout")
+	if err := fs.Parse(os.Args[2:]); err != nil {
+		return err
+	}
+	exe, err := os.Executable()
+	if err != nil {
+		return err
+	}
+	if exe, err = filepath.EvalSymlinks(exe); err != nil {
+		return err
+	}
+	if *repo == "" {
+		if *repo, err = update.FindRepo(filepath.Dir(exe)); err != nil {
+			cwd, _ := os.Getwd()
+			if *repo, err = update.FindRepo(cwd); err != nil {
+				return err
+			}
+		}
+	}
+	return update.Run(update.Options{
+		Repo:     *repo,
+		Exe:      exe,
+		BuiltRev: update.BuiltRevision(),
+		Check:    *check,
+		Force:    *force,
+		Out:      os.Stdout,
+	})
 }
 
 const (

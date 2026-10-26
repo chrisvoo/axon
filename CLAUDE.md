@@ -9,6 +9,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 # It shows the operator key once. The config keeps only a hash.
 ./axon init
 
+# Pull the latest source and rebuild what is stale (-check = report only, -force = discard local changes)
+./axon update
+
 # Build (compiles web dashboard, then Go binary)
 make build
 
@@ -29,6 +32,16 @@ pnpm build         # output goes to web/dist/, then copied by `make build`
 ```
 
 The `make build` target always rebuilds the frontend first (`web/dist/`) and copies it into `internal/dashboard/dist/`, which is embedded into the binary via `//go:embed`. Changing frontend files without re-running `make build` will not affect the binary. `internal/dashboard/dist/` is committed so that `go install` works.
+
+## Versioning
+
+The version is the `version` constant in `cmd/axon/main.go`. It is the only source. Every change that you make to the code must bump it in the same commit, by the size of the change:
+
+- **Big change** (breaking: a removed or renamed command, flag, config key or API; a new key model): bump the major version (1.2.3 → 2.0.0).
+- **Medium change** (a new feature, command or tool, with no break): bump the minor version and reset the patch (1.2.3 → 1.3.0).
+- **Minor change** (a bug fix, a refactor, a small tweak): bump the patch version (1.2.3 → 1.2.4).
+
+A change to documents or tests only does not bump the version. `axon update` shows the version of the binary that it builds.
 
 ## Architecture
 
@@ -58,6 +71,7 @@ AI client (Claude / Cursor)
 | `internal/security` | Bearer-token check, denylist, rate limiter, TLS, IP allowlist |
 | `internal/config` | YAML config loader/saver; embeds the default config and denylist; key rules (`HashKey`, `OperatorKeyMatches`, `Validate`); paths from `internal/paths` |
 | `internal/audit` | JSON-lines audit log of tool calls |
+| `internal/update` | `axon update`: git sync, stale-build assessment, rebuild (single file, `Exec`/`Look` seams for tests) |
 | `internal/tunnel` | Cloudflare tunnel integration (`trycloudflare` quick tunnel or named tunnel) |
 | `internal/dashboard` | Embeds the built dashboard (`dist/`) |
 | `internal/rootcheck` | Refuses to run as root on Unix |
@@ -70,6 +84,16 @@ AI client (Claude / Cursor)
 - **Operator secrets**: the dashboard sends `POST /api/input` with `secret` (default true). `tools.SendOperatorInput` registers each typed line in the `ProcManager` secret store (`AddSecret`, with its JSON-escaped form) before it writes to the pty. `AddSecret` needs a live process: an empty, unknown or ended process registers nothing. A secret lasts as long as its process, then 10 minutes (`releaseSecretsLocked`). The store is shared by all processes. Anything the agent or the dashboard can read must pass `ProcManager.Redact`: shell results (`RunShell`), `send_input` and finished results, and the final `text` of every tool call in `mcp.handleToolsCall` (also errors and event details). The audit logger redacts `Detail` through `SetRedactor`. Never return `TrackedProc.snapshot()` or `OutBuf` directly. Events and audit lines never contain the input text. Redaction is best effort: exact text only.
 - **Read-only mode**: if `cfg.ReadOnly` is true, `shell`, `write_file` and `edit_file` are disabled.
 - **Denylist**: `~/.axon/denylist.txt` is loaded at startup (`axon init` writes it from the embedded `internal/config/denylist.txt`). Commands that contain any pattern as a substring are blocked. A missing file means an empty denylist.
+
+### Update flow (`axon update`)
+
+`update.Run` works in three steps. It never restarts `axon serve`, and it refuses to run on Windows (a running `.exe` cannot be replaced).
+
+1. **Sync**: `git fetch`, then `git rebase @{u}`. A conflict aborts the rebase and returns an error. `-force` does `git reset --hard @{u}`. Dirty paths under `internal/dashboard/dist/` are output of an earlier update: they are restored first. Any other dirty path blocks the update unless `-force`. `-check` skips all writes and assesses `@{u}`.
+2. **Assess** (`classify`): the diff base is the commit the binary was built from (`debug.ReadBuildInfo` `vcs.revision`, from `update.BuiltRevision`), else the old HEAD. So a failed build is retried by the next run. Rules: Go change (`*.go`, `go.mod`, `go.sum`) or changed committed dist → rebuild the binary (dist is embedded). `web/` change without a dist change → rebuild the dashboard. Unknown built commit → rebuild the binary. A docs-only diff builds nothing.
+3. **Build**: dashboard with `make web` (needs `make` and `pnpm`; else warn and keep the committed dist), then `go build -o <exe>.new ./cmd/axon` run inside the repo (so VCS stamping works) and an atomic rename over the executable.
+
+`internal/dashboard/dist/` stays committed: `go install ...@latest` and plain `go build` embed it without pnpm, and `//go:embed all:dist` does not compile without that directory. Tests (`internal/update/update_test.go`) use real `git` on temp repos and fake `go`/`make`.
 
 ### Dashboard / WebSocket
 

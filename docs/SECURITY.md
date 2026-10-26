@@ -1,8 +1,25 @@
-# Security review
+# Security
+
+This document has two parts. The [security notes](#security-notes) tell you how to run Axon safely. The [security review](#security-review) lists the findings of a full review of the repository.
+
+For how the parts of Axon work together, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Security notes
+
+- Treat both keys like passwords. Rotate them with `axon keygen` and `axon keygen -operator` if they leak.
+- Keep the operator key away from the agent. Only the operator key registers secrets, answers prompts in the dashboard and reads the agent's key. The API key reaches `/mcp` only. The config file holds a hash of the operator key, which the agent cannot use. The agent can still overwrite that hash, and the change applies at the next start. Run Axon as a dedicated user and keep the config out of the agent's reach.
+- Run Axon as an unprivileged user that has no passwordless `sudo`. The denylist and the `sudo` check are guardrails, not a sandbox. A client can bypass them, for example by writing a script that calls `sudo` and running the script. The `sudo` check catches a path such as `/usr/bin/sudo`, but it does not read scripts.
+- The file tools can reach every path that the Axon user can reach.
+- Secret input is hidden by exact-text replacement, while its command runs and for 10 minutes after, in the output of every tool (shell, files, search), the logs and the dashboard. It does not hide a changed copy of the secret (for example a hash). It does not stop a hostile agent that runs commands as the Axon user. In tunnel mode, Cloudflare handles the traffic between your browser and Axon, so a secret passes through its network.
+- In tunnel mode, every request comes from `127.0.0.1`. `ip_allowlist` and the per-IP rate limit cannot tell clients apart.
+- Prefer a VPN or an SSH tunnel if you cannot expose a port safely.
+- Review and extend `~/.axon/denylist.txt` for your environment.
+
+## Security review
 
 Date: 2026-10-25. Scope: the whole repository at commit `7ecf0b1` (after the secret store, the two keys and the operator key hash). This includes the Go server, the React dashboard, the build and release files, and the install scripts.
 
-## Summary
+### Summary
 
 Axon gives an AI agent a shell on a remote machine. That is a powerful tool, and it has one main boundary: the API key. Anyone with the key has the full power of the Axon user.
 
@@ -15,7 +32,7 @@ The code is careful in many small places. The main risks come from the design, n
 
 The operator-secret path (a password typed in the dashboard) is protected on a best-effort basis. A shared secret store replaces the text in everything the agent can read, in the dashboard events and in the audit log. Tests cover this. The limits are listed in section 3. They matter: the protection stops accidental exposure, not a hostile agent.
 
-## How I checked
+### How I checked
 
 | Mark | Meaning |
 |---|---|
@@ -25,7 +42,7 @@ The operator-secret path (a password typed in the dashboard) is protected on a b
 
 Not run: `govulncheck` (not installed), the Windows code at run time, and Linux-only behaviour such as `ptrace_scope`.
 
-## 1. Threat model
+### 1. Threat model
 
 | Item | Description |
 |---|---|
@@ -34,11 +51,11 @@ Not run: `govulncheck` (not installed), the Windows code at run time, and Linux-
 | Trust boundary | The API key (the agent) and the operator key (the dashboard). With the API key, the caller can do anything the Axon user can do. The operator key adds control of the dashboard and the secret store. |
 | Out of scope | A compromised host, a malicious Axon user, a malicious `cloudflared` binary |
 
-## 2. Findings
+### 2. Findings
 
 Severity: **High** can lead to full compromise or loss of audit trust. **Medium** weakens a protection or allows denial of service. **Low** is hardening.
 
-### High
+#### High
 
 | # | Finding | Evidence | Fix |
 |---|---|---|---|
@@ -48,7 +65,7 @@ Severity: **High** can lead to full compromise or loss of audit trust. **Medium*
 | H4 | The denylist and the `sudo` check are bypassable. | Probe: `echo mk''fs` ran. `/usr/bin/sudo` was a bug and is fixed. A script that calls `sudo` still passes. Code: patterns are plain substrings. | Treat both as guardrails. Use OS controls: no sudo rights for the Axon user, containers or a sandbox. |
 | H5 | The default TLS setup leads users to turn off verification. The certificate is valid only for `localhost` and `127.0.0.1`. The printed fingerprint is 64 bits. | Code: `tls.go` lines 43 and 101. | Add a flag for host names (SANs). Print the full SHA-256. Document how clients trust the certificate. |
 
-### Medium
+#### Medium
 
 | # | Finding | Evidence | Fix |
 |---|---|---|---|
@@ -67,7 +84,7 @@ Severity: **High** can lead to full compromise or loss of audit trust. **Medium*
 | M13 | The built dashboard is committed as minified files. A reviewer cannot compare it with the source. | Code: `internal/dashboard/dist/`. | Build in CI and check that it matches the commit. |
 | M14 | A missing denylist file means no denylist. `audit_log: ""` turns off auditing. Neither prints a warning. | Code: `denylist.go:23`, `logger.go:28`. | Fail to start, or print a clear warning. |
 
-### Low
+#### Low
 
 | # | Finding | Fix |
 |---|---|---|
@@ -81,7 +98,7 @@ Severity: **High** can lead to full compromise or loss of audit trust. **Medium*
 | L8 | The audit write ignores errors. A failed write does not stop the action. | Decide whether auditing must fail closed. |
 | L9 | Windows: `rootcheck` does not detect an administrator. | Check the token. |
 
-### Dependencies
+#### Dependencies
 
 | Area | Result |
 |---|---|
@@ -89,7 +106,7 @@ Severity: **High** can lead to full compromise or loss of audit trust. **Medium*
 | Dashboard, build | `pnpm audit`: 50 advisories (20 high) in `vite`, `vitest`, `undici`, `postcss`, `picomatch`, `nanoid`. They are build-time tools. Do not expose `pnpm dev` to a network. Update `vite`. |
 | Go | Many indirect modules are from 2021 to 2022 (for example `go-ole`, `x/exp`, `plan9stats`). `govulncheck` is not installed, so I did not run it. Run it in CI. |
 
-## 3. The operator-secret path
+### 3. The operator-secret path
 
 What the code guarantees, with tests:
 
@@ -124,14 +141,14 @@ Limits. The protection is best effort:
 - **Plain responses.** With the `Secret` box off, the agent sees the text on purpose.
 - **Prompts that show typing.** The echo is replaced, so the agent sees `[redacted]` where the text was.
 
-## 4. Two bugs I found while testing
+### 4. Two bugs I found while testing
 
 | Bug | Result |
 |---|---|
 | The dashboard never showed the input prompt. The `tool_result` event replaced the "waiting" status with "done". | Fixed. Test added. I confirmed it in a browser. |
 | `go test -race` failed because of a data race on `c.ProcessState`. | Fixed. The whole suite passes with `-race`. |
 
-## 5. What is good
+### 5. What is good
 
 - API keys are 256 bits from `crypto/rand`. The comparison runs in constant time.
 - Cross-site request forgery is not possible. The API uses a `Bearer` header, not cookies, and sets no CORS headers.
@@ -141,7 +158,7 @@ Limits. The protection is best effort:
 - The dashboard uses no `innerHTML`, `dangerouslySetInnerHTML`, `eval` or `localStorage`. React escapes all output. The demo code is not in the shipped bundle.
 - A child process dies when its command times out. I tested `sh -c "sleep & sleep"` and no process stayed.
 
-## 6. Priority list
+### 6. Priority list
 
 1. Run Axon as a dedicated user without `sudo` rights. Protect the config and keys from that user (H1, H3).
 2. Send the audit log to a sink the Axon user cannot edit (H2).

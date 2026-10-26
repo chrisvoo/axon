@@ -2,7 +2,7 @@
 
 Axon is one Go binary. It runs on a remote machine and exposes that machine's shell and files to an AI agent through the Model Context Protocol (MCP). It also serves a web dashboard. The dashboard shows what the agent does.
 
-This document shows the parts of Axon, the actors, and how data moves between them. For setup, see [README.md](README.md). For build and test commands, see [CLAUDE.md](CLAUDE.md).
+This document shows the parts of Axon, the actors, and how data moves between them. For setup, see [README.md](../README.md). For build and test commands, see [CLAUDE.md](../CLAUDE.md).
 
 ## Actors
 
@@ -29,9 +29,9 @@ This document shows the parts of Axon, the actors, and how data moves between th
 
 ## System overview
 
-![Axon architecture. The AI agent and the operator reach Axon over HTTPS. Both pass the IP allowlist and the rate limit. The agent then passes the API key check and the MCP handler, the policy and the tools. The operator passes the operator key check and the operator routes, which feed the secret store. Audit and event data flow to the dashboard.](assets/axon-architecture.png)
+![Axon architecture. The AI agent and the operator reach Axon over HTTPS. Both pass the IP allowlist and the rate limit. The agent then passes the API key check and the MCP handler, the policy and the tools. The operator passes the operator key check and the operator routes, which feed the secret store. Audit and event data flow to the dashboard.](../assets/axon-architecture.png)
 
-Green boxes are the agent request path. Blue boxes are the operator path. The rose box is the secret store, which hides operator input from the agent. Amber boxes are the event and audit path. Gray boxes are actors, config and the host. The editable source is [assets/axon-architecture.svg](assets/axon-architecture.svg).
+Green boxes are the agent request path. Blue boxes are the operator path. The rose box is the secret store, which hides operator input from the agent. Amber boxes are the event and audit path. Gray boxes are actors, config and the host. The editable source is [assets/axon-architecture.svg](../assets/axon-architecture.svg).
 
 ### What the diagram shows
 
@@ -159,4 +159,4 @@ Limits. The protection is best effort:
 - In tunnel modes, every request comes from `127.0.0.1`. The IP allowlist and the per-IP rate limit cannot tell clients apart.
 - The WebSocket accepts any `Origin`. The operator key in the `?key=` query is the only check. A proxy in front of Axon, such as Cloudflare, can see that URL.
 
-See [Security notes](README.md#security-notes) for the full list.
+See [SECURITY.md](SECURITY.md) for the full list.

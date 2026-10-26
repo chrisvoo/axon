@@ -52,23 +52,6 @@ go build -o axon ./cmd/axon   # uses the committed dashboard build
 make build                    # also rebuilds the dashboard (needs pnpm)
 ```
 
-### Update
-
-On a host built from a clone, `axon update` brings it up to date:
-
-```bash
-axon update -check   # show what would change, change nothing
-axon update          # pull, rebuild what is stale, replace the binary
-```
-
-It does this:
-
-1. Fetches `origin` and rebases the checkout onto its upstream branch. If a local commit conflicts, it aborts the rebase and stops. `-force` drops local changes and commits and resets to upstream.
-2. Compares the changed files with the commit that the running binary was built from. A Go source, `go.mod`, `go.sum` or committed dashboard change rebuilds the binary. A `web/` change without a new committed `internal/dashboard/dist` rebuilds the dashboard first (`make web`, needs `pnpm`). Without `make` or `pnpm`, it warns and uses the committed dashboard. A docs-only pull builds nothing.
-3. Builds to `axon.new` next to the binary and renames it over the running one.
-
-It does not restart `axon serve`: restart it to run the new build. It works on Linux and macOS, from a git clone only (not from `go install` or the install script).
-
 ## Quick start
 
 On the remote machine:
@@ -76,6 +59,7 @@ On the remote machine:
 ```bash
 axon init    # creates ~/.axon/ with the keys, TLS certificate and denylist. Shows the operator key once.
 axon serve   # listens on https://0.0.0.0:8443/mcp
+axon update. # update a build from a git clone (Linux or macOS)
 ```
 
 **Save the operator key when `axon init` shows it.** Axon keeps only a hash and cannot show the key again. Use a password manager. `axon keygen -operator` makes a new one.
@@ -83,6 +67,8 @@ axon serve   # listens on https://0.0.0.0:8443/mcp
 `axon serve` prints the API key (for the agent), the TLS fingerprint and ready-to-paste client configuration. It also opens the dashboard in your browser. The address has no key: paste the operator key into the page. Use `-no-browser` to skip opening the browser.
 
 If you upgrade from a version with one key, run `axon init` once. It makes the operator key, shows it once, and keeps the rest.
+
+To update a build from a git clone (Linux or macOS), run `axon update`. It pulls the source and rebuilds what is stale. Restart `axon serve` to run the new build. Add `-check` to preview the changes. See [Commands](#commands).
 
 > **TLS:** the generated certificate is self-signed and valid only for `localhost` and `127.0.0.1`. A remote client cannot verify it. Use a [Cloudflare tunnel](#cloudflare-tunnel), or set `cert_file` and `key_file` to your own certificate.
 
@@ -226,14 +212,14 @@ Axon merges `~/.axon/config.yaml` over the built-in defaults.
 
 ## Security notes
 
-- Treat both keys like passwords. Rotate them with `axon keygen` and `axon keygen -operator` if they leak.
-- Keep the operator key away from the agent. Only the operator key registers secrets, answers prompts in the dashboard and reads the agent's key. The API key reaches `/mcp` only. The config file holds a hash of the operator key, which the agent cannot use. The agent can still overwrite that hash, and the change applies at the next start. Run Axon as a dedicated user and keep the config out of the agent's reach.
-- Run Axon as an unprivileged user that has no passwordless `sudo`. The denylist and the `sudo` check are guardrails, not a sandbox. A client can bypass them, for example by writing a script that calls `sudo` and running the script. The `sudo` check catches a path such as `/usr/bin/sudo`, but it does not read scripts.
-- The file tools can reach every path that the Axon user can reach.
-- Secret input is hidden by exact-text replacement, while its command runs and for 10 minutes after, in the output of every tool (shell, files, search), the logs and the dashboard. It does not hide a changed copy of the secret (for example a hash). It does not stop a hostile agent that runs commands as the Axon user. In tunnel mode, Cloudflare handles the traffic between your browser and Axon, so a secret passes through its network.
-- In tunnel mode, every request comes from `127.0.0.1`. `ip_allowlist` and the per-IP rate limit cannot tell clients apart.
-- Prefer a VPN or an SSH tunnel if you cannot expose a port safely.
-- Review and extend `~/.axon/denylist.txt` for your environment.
+Axon gives an agent a shell on your machine. The API key is the main boundary: anyone who has it can do what the Axon user can do. The denylist and the `sudo` check are guardrails, not a sandbox.
+
+[docs/SECURITY.md](docs/SECURITY.md) has two parts:
+
+- **Security notes**: how to run Axon safely. It covers key handling, a dedicated unprivileged user, secret input, tunnel mode and the denylist.
+- **Security review**: the findings of a full review (high, medium and low), the guarantees of the secret-input path, and a priority list of fixes.
+
+For how the parts fit together, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## License
 

@@ -2,15 +2,40 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Context documents
+
+Read the document that matches your task before you change code. This file keeps only the commands, the rules and the code-level invariants.
+
+| Document | Read it when you touch | Contents |
+|---|---|---|
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | `internal/server`, `internal/mcp`, `internal/tools`, `internal/hub`, events | Actors, stack, request flow, shell call sequence, operator secrets, events, trust limits |
+| [docs/SECURITY.md](docs/SECURITY.md) | keys, denylist, `sudo` check, secret store, TLS, audit log | Operating notes, review findings (high, medium, low), guarantees of the secret path |
+| [README.md](README.md) | commands, flags, config keys, MCP tools | User-facing setup and reference |
+
+Keep the documents true. A change that fixes a finding updates its entry in `docs/SECURITY.md`. A change to a command, flag, config key or tool updates `README.md` and the commands in this file.
+
+## Quick start
+
+```bash
+make build                       # compile the dashboard, then the Go binary (./axon)
+./axon init                      # first time only: API key, operator key, TLS cert, denylist in ~/.axon/
+make dev                         # plain HTTP on 127.0.0.1, no TLS, for local development
+./axon update                    # later: pull the source and rebuild what is stale
+```
+
+`axon init` shows the operator key once. The config keeps only a hash. `axon update` never restarts `axon serve`: restart it to run the new build.
+
 ## Commands
 
 ```bash
 # First-time setup (generates API key, operator key, TLS cert, denylist in ~/.axon/).
-# It shows the operator key once. The config keeps only a hash.
 ./axon init
 
-# Pull the latest source and rebuild what is stale (-check = report only, -force = discard local changes)
+# Pull the latest source and rebuild what is stale
 ./axon update
+./axon update -check            # report only, change nothing
+./axon update -force            # discard local changes and commits
+./axon update -repo PATH        # use this checkout
 
 # Build (compiles web dashboard, then Go binary)
 make build
@@ -43,11 +68,9 @@ The version is the `version` constant in `cmd/axon/main.go`. It is the only sour
 
 A change to documents or tests only does not bump the version. `axon update` shows the version of the binary that it builds.
 
-## Architecture
+## Architecture in brief
 
-Axon is a **remote MCP (Model Context Protocol) server** that exposes the remote machine's shell and filesystem as MCP tools, secured with two keys (the agent's API key and the operator's key) and (optionally) TLS.
-
-### Request flow
+Axon is a **remote MCP (Model Context Protocol) server**. It exposes the machine's shell and files as MCP tools. Two keys secure it (the agent's API key and the operator's key), and optionally TLS. For the full picture and diagrams, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```
 AI client (Claude / Cursor)
@@ -58,11 +81,9 @@ AI client (Claude / Cursor)
   → events.Bus.Publish() → Hub → WebSocket broadcast → React dashboard
 ```
 
-### Key packages
-
 | Package | Role |
 |---|---|
-| `cmd/axon` | CLI entry point: `init`, `serve`, `status`, `keygen`; terminal banner in `startup.go` |
+| `cmd/axon` | CLI entry point: `init`, `serve`, `status`, `keygen`, `update`, `version`; terminal banner in `startup.go` |
 | `internal/mcp` | JSON-RPC 2.0 handler; all tool dispatch lives in `handleToolsCall` |
 | `internal/tools` | Tool implementations: shell, read/write/edit file, grep, glob, system_info, send_input, cancel_command |
 | `internal/server` | HTTP(S) server, routes (`/mcp`, `/ws`, `/api/cancel`, `/api/input`, `/api/agent-config`), and the MCP client-config snippet builders used by `cmd/axon` |
@@ -77,31 +98,44 @@ AI client (Claude / Cursor)
 | `internal/rootcheck` | Refuses to run as root on Unix |
 | `web/` | React 19 + Tailwind 4 dashboard, bundled by Vite, tested with Vitest |
 
-### Shell tool behaviour
+`serve -dev`, `-tunnel` and `-tunnel-name` all run plain HTTP on `127.0.0.1`. Without them, the server uses TLS (self-signed certificate by default) on `listen_addr` (default `0.0.0.0`).
 
-- **`sudo` detection**: `isPrivilegedCmd` in `mcp.go` does a word-boundary scan for `sudo`. Matching commands are never executed — they are published as `privileged_commands` events to the dashboard for manual copy-paste. The tool returns `{"status":"requires_user_action"}`. This is a guardrail, not a security boundary: a path such as `/usr/bin/sudo` is detected, but a script that calls `sudo` is not.
-- **Interactive stall**: non-sudo commands that produce no output for `InputStallSec` (default 5 s) return `{"status":"input_required", "process_id":"..."}`. The caller must use `send_input` or `cancel_command` to continue. The command outlives the HTTP request and ends at `shell_timeout`. When it ends, `ProcManager.Finish` keeps its final result for 2 minutes, so `send_input` (empty data) still returns the output and exit code if the operator answered in the dashboard.
-- **Operator secrets**: the dashboard sends `POST /api/input` with `secret` (default true). `tools.SendOperatorInput` registers each typed line in the `ProcManager` secret store (`AddSecret`, with its JSON-escaped form) before it writes to the pty. `AddSecret` needs a live process: an empty, unknown or ended process registers nothing. A secret lasts as long as its process, then 10 minutes (`releaseSecretsLocked`). The store is shared by all processes. Anything the agent or the dashboard can read must pass `ProcManager.Redact`: shell results (`RunShell`), `send_input` and finished results, and the final `text` of every tool call in `mcp.handleToolsCall` (also errors and event details). The audit logger redacts `Detail` through `SetRedactor`. Never return `TrackedProc.snapshot()` or `OutBuf` directly. Events and audit lines never contain the input text. Redaction is best effort: exact text only.
+## Code-level invariants
+
+These rules are easy to break by accident. The reasons are in [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) and [docs/SECURITY.md](docs/SECURITY.md).
+
+### Shell tool
+
+- **`sudo` detection**: `isPrivilegedCmd` in `mcp.go` does a word-boundary scan for `sudo`. A matching command never runs. It is published as a `privileged_commands` event, and the tool returns `{"status":"requires_user_action"}`. This is a guardrail, not a security boundary.
+- **Interactive stall**: a non-sudo command with no output for `InputStallSec` (default 5 s) returns `{"status":"input_required", "process_id":"..."}`. The command outlives the HTTP request and ends at `shell_timeout`. `ProcManager.Finish` keeps its final result for 2 minutes, so `send_input` (empty data) still returns the output and exit code.
 - **Read-only mode**: if `cfg.ReadOnly` is true, `shell`, `write_file` and `edit_file` are disabled.
-- **Denylist**: `~/.axon/denylist.txt` is loaded at startup (`axon init` writes it from the embedded `internal/config/denylist.txt`). Commands that contain any pattern as a substring are blocked. A missing file means an empty denylist.
+- **Denylist**: `~/.axon/denylist.txt` is loaded at startup (`axon init` writes it from the embedded `internal/config/denylist.txt`). A command that contains a pattern as a substring is blocked. A missing file means an empty denylist.
+
+### Keys and dashboard
+
+- The API key opens `/mcp` only. The operator key opens `/ws` (as the `?key=` query, checked in `hub.ServeWS`), `/api/input`, `/api/cancel` and `/api/agent-config` (as a Bearer token, `requireKey` in `server.go`).
+- The agent must never get the operator key: it can register secrets and answer prompts. The config stores only `OperatorKeyHash` (`config.HashKey`, SHA-256). `Config.OperatorKeyMatches` hashes the token, so the stored hash does not work as a key. `Config.Validate` requires two different keys.
+- The agent can read `config.yaml`. Never store or print the operator key anywhere other than once in `axon init` and `axon keygen -operator` (`ensureKeys`, `newOperatorKey`).
+- The dashboard reads the key from the URL hash (`App.tsx`), keeps it in `sessionStorage` and removes the hash. `ConnectScreen` takes a pasted key. `axon serve` opens the dashboard without a key in the address.
+- `GET /api/agent-config` gives the API key to the dashboard for its setup snippet.
+- The hub fans out every `events.Event` (tool calls, results, input_required, system stats) to all clients. `events.Bus` drops events when a subscriber buffer is full.
+
+### Operator secrets
+
+- The dashboard sends `POST /api/input` with `secret` (default true). `tools.SendOperatorInput` registers each typed line in the `ProcManager` secret store (`AddSecret`, with its JSON-escaped form) before it writes to the pty.
+- `AddSecret` needs a live process: an empty, unknown or ended process registers nothing, and `/api/input` rejects an empty `process_id`. A secret lasts as long as its process, then 10 minutes (`releaseSecretsLocked`). The store is shared by all processes.
+- Anything the agent or the dashboard can read must pass `ProcManager.Redact`: shell results (`RunShell`), `send_input` and finished results, and the final `text` of every tool call in `mcp.handleToolsCall` (also errors and event details). The audit logger redacts `Detail` through `SetRedactor`.
+- Never return `TrackedProc.snapshot()` or `OutBuf` directly. Events and audit lines never contain the input text. Redaction is best effort: exact text only.
 
 ### Update flow (`axon update`)
 
-`update.Run` works in three steps. It never restarts `axon serve`, and it refuses to run on Windows (a running `.exe` cannot be replaced).
+`update.Run` never restarts `axon serve`, and it refuses to run on Windows (a running `.exe` cannot be replaced). It works in three steps:
 
 1. **Sync**: `git fetch`, then `git rebase @{u}`. A conflict aborts the rebase and returns an error. `-force` does `git reset --hard @{u}`. Dirty paths under `internal/dashboard/dist/` are output of an earlier update: they are restored first. Any other dirty path blocks the update unless `-force`. `-check` skips all writes and assesses `@{u}`.
-2. **Assess** (`classify`): the diff base is the commit the binary was built from (`debug.ReadBuildInfo` `vcs.revision`, from `update.BuiltRevision`), else the old HEAD. So a failed build is retried by the next run. Rules: Go change (`*.go`, `go.mod`, `go.sum`) or changed committed dist → rebuild the binary (dist is embedded). `web/` change without a dist change → rebuild the dashboard. Unknown built commit → rebuild the binary. A docs-only diff builds nothing.
-3. **Build**: dashboard with `make web` (needs `make` and `pnpm`; else warn and keep the committed dist), then `go build -o <exe>.new ./cmd/axon` run inside the repo (so VCS stamping works) and an atomic rename over the executable.
+2. **Assess** (`classify`): the diff base is the commit the binary was built from (`debug.ReadBuildInfo` `vcs.revision`, from `update.BuiltRevision`), else the old HEAD. So a failed build is retried by the next run. A Go change (`*.go`, `go.mod`, `go.sum`) or a changed committed dist rebuilds the binary (dist is embedded). A `web/` change without a dist change rebuilds the dashboard. An unknown built commit rebuilds the binary. A docs-only diff builds nothing.
+3. **Build**: the dashboard with `make web` (needs `make` and `pnpm`; else warn and keep the committed dist), then `go build -o <exe>.new ./cmd/axon` inside the repo (so VCS stamping works) and an atomic rename over the executable.
 
 `internal/dashboard/dist/` stays committed: `go install ...@latest` and plain `go build` embed it without pnpm, and `//go:embed all:dist` does not compile without that directory. Tests (`internal/update/update_test.go`) use real `git` on temp repos and fake `go`/`make`.
-
-### Dashboard / WebSocket
-
-The React dashboard connects to `GET /ws` (WebSocket). The user pastes the operator key in `ConnectScreen` (opening `/#<operator key>` also works). `App.tsx` reads the key from the URL hash (if present), stores it in `sessionStorage` and removes the hash. `axon serve` opens the dashboard without a key in the address. The socket then sends the key as the `?key=` query parameter, which `hub.ServeWS` validates against the operator key. `/api/input`, `/api/cancel` and `/api/agent-config` take the operator key as a Bearer token (`requireKey` in `server.go`). `/mcp` takes only the API key. The agent must never get the operator key: it can register secrets and answer prompts. The config stores only `OperatorKeyHash` (`config.HashKey`, SHA-256). `Config.OperatorKeyMatches` hashes the token, so the stored hash does not work as a key. The agent can read `config.yaml`, so never store or print the operator key anywhere else than once in `axon init` and `axon keygen -operator` (`ensureKeys`, `newOperatorKey`). `Config.Validate` requires two different keys. `AddSecret` needs a live process: an empty id registers nothing, and `/api/input` rejects an empty `process_id`. `GET /api/agent-config` gives the API key to the dashboard for its setup snippet. The hub fans out every `events.Event` (tool calls, results, input_required, system stats) to all connected clients. `events.Bus` drops events when a subscriber buffer is full.
-
-### Dev vs production mode
-
-`serve -dev`, `-tunnel` and `-tunnel-name` all run plain HTTP on `127.0.0.1`. Without them, the server uses TLS (self-signed certificate by default) on `listen_addr` (default `0.0.0.0`).
 
 ## axon MCP shell session behaviour (when using this server via MCP)
 

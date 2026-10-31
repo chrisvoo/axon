@@ -9,8 +9,9 @@ const FG: Record<number, string> = {
 }
 
 function processLine(line: string): string {
-  // \r means "go to start of line" — take the last segment written
-  const parts = line.split('\r')
+  // \r means "go to start of line" — take the last segment written. A trailing \r is
+  // the first half of a CRLF line ending from the pty, not a rewrite: drop it first.
+  const parts = line.replace(/\r$/, '').split('\r')
   return parts[parts.length - 1]
 }
 

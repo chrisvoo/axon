@@ -1,5 +1,17 @@
 import { describe, expect, it } from 'vitest'
-import { extractShellOutput } from './ansi'
+import { extractShellOutput, parseAnsi } from './ansi'
+
+describe('parseAnsi', () => {
+  const text = (raw: string) => parseAnsi(raw).map((s) => s.text).join('')
+
+  it('keeps lines that end in CRLF', () => {
+    expect(text('one\r\ntwo\r\n')).toBe('one\ntwo\n')
+  })
+
+  it('keeps only the last rewrite of a progress line', () => {
+    expect(text('10%\r50%\r100%\r\ndone\r\n')).toBe('100%\ndone\n')
+  })
+})
 
 describe('extractShellOutput', () => {
   it('returns plain text unchanged', () => {

@@ -25,7 +25,7 @@ import (
 	"github.com/chrisvoo/axon/internal/update"
 )
 
-const version = "1.2.1" // semantic version: see "Versioning" in CLAUDE.md
+const version = "1.2.2" // semantic version: see "Versioning" in CLAUDE.md
 
 // Specific styles for main.go (reuses cyanStyle, dimStyle, boldStyle from startup.go)
 var (

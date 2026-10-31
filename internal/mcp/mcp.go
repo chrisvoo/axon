@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"path"
 	"strings"
 	"time"
 
@@ -310,12 +311,12 @@ func (s *Server) handleToolsCall(ctx context.Context, w http.ResponseWriter, req
 		s.publish(events.Event{
 			Type: "tool_result",
 			Data: map[string]any{
-				"call_id":      callID,
-				"tool":         params.Name,
-				"remote_ip":    remoteIP,
-				"duration_ms":  durationMs,
-				"ok":           false,
-				"is_error":     true,
+				"call_id":        callID,
+				"tool":           params.Name,
+				"remote_ip":      remoteIP,
+				"duration_ms":    durationMs,
+				"ok":             false,
+				"is_error":       true,
 				"output_preview": previewText(errText, 4000),
 			},
 		})
@@ -379,9 +380,22 @@ func isPrivilegedCmd(cmd string) bool {
 
 // maskInertText replaces with spaces the text that the shell never runs: comments,
 // single-quoted strings and double-quoted strings without command substitution.
-// A quoted string stays visible after -c or eval, and when it holds $( or a backtick,
-// because the shell runs that text. A heredoc body also stays visible.
+// Nothing is masked when the shell could run the quoted text: a heredoc, or an unquoted
+// word that hands text to a shell or another command (sh, eval, ssh, xargs, exec, env).
+// A quoted string also stays visible in command position ("sudo" id) and when it holds
+// $( or a backtick.
 func maskInertText(cmd string) string {
+	if strings.Contains(cmd, "<<") {
+		return cmd
+	}
+	masked := blankInertText(cmd)
+	if hasRunnerWord(masked) {
+		return cmd
+	}
+	return masked
+}
+
+func blankInertText(cmd string) string {
 	b := []byte(cmd)
 	for i := 0; i < len(b); i++ {
 		switch c := b[i]; {
@@ -399,7 +413,7 @@ func maskInertText(cmd string) string {
 			if end < 0 {
 				return string(b) // unterminated: keep the rest visible
 			}
-			if !substitutes && !runsItsArgument(b, i) {
+			if !substitutes && !atCommandPosition(b, i) {
 				for j := i + 1; j < end; j++ {
 					b[j] = ' '
 				}
@@ -411,15 +425,17 @@ func maskInertText(cmd string) string {
 }
 
 // closingQuote returns the index of the quote that closes the one at b[open], or -1.
-// substitutes is true when a double-quoted string holds $( or a backtick.
+// substitutes is true when a double-quoted string holds $( or a backtick. A $'...'
+// string reads backslash escapes, so \' does not close it.
 func closingQuote(b []byte, open int) (end int, substitutes bool) {
 	q := b[open]
+	escapes := q == '"' || (open > 0 && b[open-1] == '$')
 	for j := open + 1; j < len(b); j++ {
 		switch {
+		case escapes && b[j] == '\\':
+			j++
 		case b[j] == q:
 			return j, substitutes
-		case q == '"' && b[j] == '\\':
-			j++
 		case q == '"' && (b[j] == '`' || (b[j] == '$' && j+1 < len(b) && b[j+1] == '(')):
 			substitutes = true
 		}
@@ -427,19 +443,36 @@ func closingQuote(b []byte, open int) (end int, substitutes bool) {
 	return -1, false
 }
 
-// runsItsArgument reports whether the word before b[quote] makes the shell run the
-// quoted text: eval, or a -c flag such as bash -c or sh -lc.
-func runsItsArgument(b []byte, quote int) bool {
-	end := quote
-	for end > 0 && (b[end-1] == ' ' || b[end-1] == '\t') {
-		end--
+// atCommandPosition reports whether the quote at b[quote] starts a command word, as in
+// "sudo" id or echo hi; 'sudo' id.
+func atCommandPosition(b []byte, quote int) bool {
+	j := quote
+	for j > 0 && (b[j-1] == ' ' || b[j-1] == '\t') {
+		j--
 	}
-	start := end
-	for start > 0 && !isShellBoundary(b[start-1]) {
-		start--
+	return j == 0 || strings.IndexByte(";&|(\n`{", b[j-1]) >= 0
+}
+
+// runnerWords hand text to a shell or to another command, so quoted text near them can
+// run: bash -c "sudo id", echo "sudo id" | sh, ssh host "sudo id", xargs, env "sudo" id.
+var runnerWords = map[string]bool{
+	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "busybox": true,
+	"eval": true, "source": true, "exec": true, "env": true, "command": true,
+	"nohup": true, "time": true, "xargs": true, "ssh": true,
+}
+
+// hasRunnerWord reports whether any word of cmd is a runner word. A path counts only
+// in a bin directory (/bin/sh), so that grep x /etc/ssh does not.
+func hasRunnerWord(cmd string) bool {
+	words := strings.FieldsFunc(cmd, func(r rune) bool {
+		return r < 128 && (isShellBoundary(byte(r)) || strings.ContainsRune(`"'`+"`)", r))
+	})
+	for _, w := range words {
+		if dir, base := path.Split(w); runnerWords[base] && (dir == "" || strings.HasSuffix(dir, "bin/")) {
+			return true
+		}
 	}
-	w := string(b[start:end])
-	return w == "eval" || (strings.HasPrefix(w, "-") && !strings.HasPrefix(w, "--") && strings.HasSuffix(w, "c"))
+	return false
 }
 
 // hasSudoWord reports whether cmd holds sudo as a word. A quote, a backtick and a

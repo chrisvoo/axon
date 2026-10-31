@@ -40,6 +40,14 @@ func TestIsPrivilegedCmd(t *testing.T) {
 		{"echo \"`sudo id`\"", true},
 		{`echo "x" && sudo id`, true},
 		{`echo "unterminated sudo`, true},
+		// Review findings: the shell reads these differently from a naive quote scan.
+		{`echo $'a\'b'; sudo id; echo $'c'`, true}, // ANSI-C quoting: \' does not close the string
+		{"cat <<EOF\nit's\nEOF\nsudo id\n'", true}, // heredoc body holds an apostrophe
+		{`"sudo" id`, true},                        // quoted word in command position
+		{`echo hi; 'sudo' id`, true},
+		{`echo "sudo id" | sh`, true}, // quoted text piped into a shell
+		{`ssh host "sudo id"`, true},  // runs on the remote side
+		{`xargs -I{} sh -c 'sudo {}'`, true},
 	}
 	for _, tc := range cases {
 		if got := isPrivilegedCmd(tc.cmd); got != tc.want {

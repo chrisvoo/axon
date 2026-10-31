@@ -63,7 +63,7 @@ axon update. # update a build from a git clone (Linux or macOS)
 
 `axon init` and `axon serve` show the API key. The agent and the dashboard use this one key. Treat it like a password. `axon keygen` makes a new one.
 
-`axon serve` prints the API key, the TLS fingerprint and ready-to-paste client configuration. It also opens the dashboard in your browser. The address has no key: paste the API key into the page. Use `-no-browser` to skip opening the browser.
+`axon serve` prints the API key, the TLS fingerprint and ready-to-paste client configuration. The Dashboard line is a clickable link that holds the API key after the `#`, so one click connects (your terminal must support hyperlinks, for example iTerm2, WezTerm or Kitty). Axon also opens the dashboard in your browser, but without the key in the address: click the link or paste the API key into the page. Use `-no-browser` to skip opening the browser.
 
 If you upgrade from version 1.x, you do not need to change anything. The operator key is gone: the dashboard now takes the API key. Axon ignores the old `operator_key_hash` line in `config.yaml` and drops it the next time it saves the file.
 

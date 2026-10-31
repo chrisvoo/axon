@@ -57,7 +57,7 @@ Green boxes are the agent request path. Blue boxes are the dashboard path. Amber
 
 **Dashboard**
 
-- The operator opens the dashboard and pastes the API key. The page keeps it in `sessionStorage` for the life of the tab. A key in the address fragment also works. `axon serve` does not put one there, so it never shows in the process list.
+- The operator opens the dashboard and pastes the API key. The page keeps it in `sessionStorage` for the life of the tab. A key in the address fragment also works. `axon serve` prints a clickable link with the key in the fragment. A browser never sends a fragment to the server, so no log sees it. Axon opens the browser without a key, so it never shows in the process list.
 - The page opens `GET /ws` and offers two WebSocket subprotocols: `axon.v1` and `axon.key.<API key>`. The key travels in the `Sec-WebSocket-Protocol` request header. It is not in the URL, so it does not show in a proxy access log or in the browser history.
 - Axon selects `axon.v1`. It never sends the key back.
 - A missing or wrong key does not get an HTTP error. A browser cannot read the status of a failed handshake. Axon completes the handshake and closes the connection with code `4401` before it sends any event. The dashboard then asks for a new key.

@@ -25,7 +25,7 @@ import (
 	"github.com/chrisvoo/axon/internal/update"
 )
 
-const version = "2.0.0" // semantic version: see "Versioning" in CLAUDE.md
+const version = "2.0.1" // semantic version: see "Versioning" in CLAUDE.md
 
 // Specific styles for main.go (reuses cyanStyle, dimStyle, boldStyle from startup.go)
 var (
@@ -226,7 +226,8 @@ func cmdServe() error {
 		}
 
 		if !*noBrowser {
-			// No key in the address: it would show in the process list. Paste the API key.
+			// No key in the address: it would show in the process list. Click the
+			// printed Dashboard link (it has the key) or paste the API key.
 			go openBrowser(dashboardURL)
 		}
 

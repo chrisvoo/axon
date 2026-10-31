@@ -150,3 +150,24 @@ func TestKeygenRejectsTheRemovedOperatorFlag(t *testing.T) {
 		t.Fatal("keygen -operator must fail: the flag no longer exists")
 	}
 }
+
+func TestDashboardLinkKeepsTheKeyInTheFragment(t *testing.T) {
+	got := dashboardLink("https://host:8443/", "axon_k_abc")
+	if got != "https://host:8443/#axon_k_abc" {
+		t.Fatalf("got %q", got)
+	}
+	if strings.Contains(strings.SplitN(got, "#", 2)[0], "axon_k_") {
+		t.Fatal("the key must be after the #, where no server or proxy sees it")
+	}
+}
+
+// The terminal shows the clickable link with the key, so one click connects.
+func TestServerInfoPrintsAClickableLinkWithTheKey(t *testing.T) {
+	out := capture(t, func() error {
+		printServerInfo("http://127.0.0.1:8443/mcp", "http://127.0.0.1:8443/", "axon_k_abc")
+		return nil
+	})
+	if !strings.Contains(out, "\033]8;;http://127.0.0.1:8443/#axon_k_abc\033\\") {
+		t.Fatalf("the Dashboard line must be a hyperlink to the address with the key:\n%q", out)
+	}
+}

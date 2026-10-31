@@ -44,9 +44,17 @@ func hyperlink(url, text string) string {
 	return "\033]8;;" + url + "\033\\" + text + "\033]8;;\033\\"
 }
 
+// dashboardLink returns the dashboard address with the API key in the fragment. A
+// browser never sends the fragment to the server, so no log sees it. Only print it
+// in the terminal. Do not pass it to a program: the key would show in `ps`.
+func dashboardLink(dashboardURL, apiKey string) string {
+	return dashboardURL + "#" + apiKey
+}
+
 func printServerInfo(listenLine, dashboardURL, apiKey string, extra ...string) {
+	link := dashboardLink(dashboardURL, apiKey)
 	fmt.Printf("  %s  %s\n", boldStyle.Render("Listening:"), cyanStyle.Render(listenLine))
-	fmt.Printf("  %s   %s\n", boldStyle.Render("Dashboard:"), hyperlink(dashboardURL, cyanStyle.Render(dashboardURL)))
+	fmt.Printf("  %s   %s\n", boldStyle.Render("Dashboard:"), hyperlink(link, cyanStyle.Render(link)))
 	fmt.Printf("  %s      %s %s\n", boldStyle.Render("API key:"), greenStyle.Render(apiKey), dimStyle.Render("(AI agent and dashboard)"))
 
 	for _, line := range extra {

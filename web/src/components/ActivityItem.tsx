@@ -1,6 +1,5 @@
 import { useState } from 'react'
 import type { ActivityRow } from '../types'
-import { InputPrompt } from './InputPrompt'
 import { extractShellOutput, parseAnsi } from '../ansi'
 
 function AnsiPre({ text }: { text: string }) {
@@ -22,9 +21,9 @@ function AnsiPre({ text }: { text: string }) {
   )
 }
 
-type Props = { row: ActivityRow; apiKey: string; mockApi?: boolean }
+type Props = { row: ActivityRow }
 
-export function ActivityItem({ row, apiKey, mockApi }: Props) {
+export function ActivityItem({ row }: Props) {
   const [open, setOpen] = useState(true)
 
   // A shell result carries a JSON envelope: show only its output.
@@ -90,8 +89,16 @@ export function ActivityItem({ row, apiKey, mockApi }: Props) {
               <AnsiPre text={output} />
             </pre>
           )}
-          {row.status === 'waiting_input' && row.processId && (
-            <InputPrompt processId={row.processId} apiKey={apiKey} hint={row.hint} mockApi={mockApi} />
+          {row.status === 'waiting_input' && (
+            <div
+              data-testid="waiting-notice"
+              className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-amber-200"
+            >
+              <p className="font-medium">Command waits for input</p>
+              <p className="mt-1 text-amber-100/80">
+                {row.hint || 'The agent can answer with send_input or stop it with cancel_command.'}
+              </p>
+            </div>
           )}
         </div>
       )}

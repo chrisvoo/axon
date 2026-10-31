@@ -11,46 +11,33 @@ import (
 )
 
 func TestGenKey(t *testing.T) {
-	a, err := genKey(apiKeyPrefix)
+	k, err := genKey()
 	if err != nil {
 		t.Fatal(err)
 	}
-	o, err := genKey(operatorKeyPrefix)
-	if err != nil {
-		t.Fatal(err)
+	if !strings.HasPrefix(k, "axon_k_") || len(k) != len("axon_k_")+64 {
+		t.Fatalf("a key must start with axon_k_ and hold 256 bits (64 hex characters): %q", k)
 	}
-	if !strings.HasPrefix(a, "axon_k_") || !strings.HasPrefix(o, "axon_o_") {
-		t.Fatalf("unexpected prefixes: %q, %q", a, o)
-	}
-	if len(a) != len("axon_k_")+64 || len(o) != len("axon_o_")+64 {
-		t.Fatalf("a key must hold 256 bits (64 hex characters): %q, %q", a, o)
-	}
-	other, _ := genKey(apiKeyPrefix)
-	if a == other {
+	other, _ := genKey()
+	if k == other {
 		t.Fatal("two keys must differ")
 	}
 }
 
-func TestEnsureKeysStoresOnlyAHashAndKeepsExistingKeys(t *testing.T) {
+func TestEnsureAPIKeyCreatesOnceAndKeepsAnExistingKey(t *testing.T) {
 	var cfg config.Config
-	opKey, err := ensureKeys(&cfg)
-	if err != nil {
+	if err := ensureAPIKey(&cfg); err != nil {
 		t.Fatal(err)
 	}
-	if !strings.HasPrefix(opKey, "axon_o_") || !strings.HasPrefix(cfg.APIKey, "axon_k_") {
-		t.Fatalf("unexpected keys: %q, %q", opKey, cfg.APIKey)
+	if !strings.HasPrefix(cfg.APIKey, "axon_k_") {
+		t.Fatalf("unexpected key %q", cfg.APIKey)
 	}
-	if !cfg.OperatorKeyMatches(opKey) || strings.Contains(cfg.OperatorKeyHash, opKey) {
-		t.Fatalf("the config must hold a hash of the operator key: %q", cfg.OperatorKeyHash)
-	}
-
-	hash, api := cfg.OperatorKeyHash, cfg.APIKey
-	again, err := ensureKeys(&cfg)
-	if err != nil {
+	key := cfg.APIKey
+	if err := ensureAPIKey(&cfg); err != nil {
 		t.Fatal(err)
 	}
-	if again != "" || cfg.OperatorKeyHash != hash || cfg.APIKey != api {
-		t.Fatal("existing keys must be kept, and the operator key is not shown again")
+	if cfg.APIKey != key {
+		t.Fatal("an existing key must be kept")
 	}
 }
 
@@ -80,9 +67,9 @@ func capture(t *testing.T, f func() error) string {
 	return string(out)
 }
 
-func operatorKeyIn(out string) string {
+func apiKeyIn(out string) string {
 	for _, f := range strings.Fields(out) {
-		if strings.HasPrefix(f, "axon_o_") {
+		if strings.HasPrefix(f, "axon_k_") {
 			return f
 		}
 	}
@@ -102,47 +89,64 @@ func readConfigFile(t *testing.T) string {
 	return string(data)
 }
 
-func TestInitShowsTheOperatorKeyOnceAndStoresOnlyItsHash(t *testing.T) {
+func TestInitShowsTheAPIKeyAndKeepsItOnASecondRun(t *testing.T) {
 	isolatedHome(t)
 
 	out := capture(t, cmdInit)
-	key := operatorKeyIn(out)
+	key := apiKeyIn(out)
 	if key == "" {
-		t.Fatalf("axon init must show the operator key once:\n%s", out)
+		t.Fatalf("axon init must show the API key:\n%s", out)
 	}
 	file := readConfigFile(t)
-	if strings.Contains(file, key) {
-		t.Fatalf("the operator key is in the config file:\n%s", file)
+	if !strings.Contains(file, "api_key: "+key) {
+		t.Fatalf("the config file must hold the API key:\n%s", file)
 	}
-	if !strings.Contains(file, "operator_key_hash: sha256:") {
-		t.Fatalf("the config file must hold the hash:\n%s", file)
+	if strings.Contains(file, "operator") {
+		t.Fatalf("the config file must not mention an operator key:\n%s", file)
 	}
 
 	out = capture(t, cmdInit)
-	if operatorKeyIn(out) != "" {
-		t.Fatalf("a second axon init must not show an operator key:\n%s", out)
+	if apiKeyIn(out) != key {
+		t.Fatalf("a second axon init must show the same key:\n%s", out)
 	}
 	if readConfigFile(t) != file {
-		t.Fatal("a second axon init must keep the keys")
+		t.Fatal("a second axon init must keep the config")
 	}
 }
 
-func TestKeygenOperatorShowsTheNewKeyOnceAndStoresOnlyItsHash(t *testing.T) {
+func TestKeygenRotatesTheAPIKey(t *testing.T) {
+	isolatedHome(t)
+	first := apiKeyIn(capture(t, cmdInit))
+
+	oldArgs := os.Args
+	os.Args = []string{"axon", "keygen"}
+	defer func() { os.Args = oldArgs }()
+	out := capture(t, cmdKeygen)
+
+	key := apiKeyIn(out)
+	if key == "" || key == first {
+		t.Fatalf("keygen must show a new key, got %q after %q", key, first)
+	}
+	if !strings.Contains(readConfigFile(t), "api_key: "+key) {
+		t.Fatal("the new key must be stored")
+	}
+}
+
+// The operator key is gone. The flag must fail instead of rotating something else.
+func TestKeygenRejectsTheRemovedOperatorFlag(t *testing.T) {
 	isolatedHome(t)
 	capture(t, cmdInit)
-	before := readConfigFile(t)
 
 	oldArgs := os.Args
 	os.Args = []string{"axon", "keygen", "-operator"}
 	defer func() { os.Args = oldArgs }()
-	out := capture(t, cmdKeygen)
 
-	key := operatorKeyIn(out)
-	if key == "" {
-		t.Fatalf("keygen -operator must show the new key:\n%s", out)
-	}
-	after := readConfigFile(t)
-	if after == before || strings.Contains(after, key) {
-		t.Fatalf("the hash must change, and the key must not be stored:\n%s", after)
+	old := os.Stderr
+	devNull, _ := os.OpenFile(os.DevNull, os.O_WRONLY, 0)
+	os.Stderr = devNull
+	defer func() { os.Stderr = old; _ = devNull.Close() }()
+
+	if err := cmdKeygen(); err == nil {
+		t.Fatal("keygen -operator must fail: the flag no longer exists")
 	}
 }

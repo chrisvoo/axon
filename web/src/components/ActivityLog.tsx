@@ -4,15 +4,13 @@ import { ActivityItem } from './ActivityItem'
 
 type Props = {
   items: ActivityRow[]
-  apiKey: string
   onClear: () => void
-  mockApi?: boolean
 }
 
 // Scroll distance (px) after which the back-to-top button appears
 const SHOW_TOP_AFTER = 200
 
-export function ActivityLog({ items, apiKey, onClear, mockApi }: Props) {
+export function ActivityLog({ items, onClear }: Props) {
   const scroller = useRef<HTMLDivElement>(null)
   const [showTop, setShowTop] = useState(false)
 
@@ -37,7 +35,7 @@ export function ActivityLog({ items, apiKey, onClear, mockApi }: Props) {
         {items.length === 0 ? (
           <p className="text-sm text-zinc-500">Waiting for tool calls from the AI agent</p>
         ) : (
-          items.map((row) => <ActivityItem key={row.callId} row={row} apiKey={apiKey} mockApi={mockApi} />)
+          items.map((row) => <ActivityItem key={row.callId} row={row} />)
         )}
       </div>
       <button

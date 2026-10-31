@@ -17,13 +17,12 @@ Axon is a standalone Go agent. It exposes an [MCP](https://modelcontextprotocol.
 
 ## Features
 
-- Two keys: the agent's API key opens `/mcp` (`Authorization: Bearer axon_k_...`). A separate operator key opens the dashboard (`axon_o_...`). The agent does not have the operator key. Axon stores only a hash of the operator key, so the agent cannot read it from the config file.
+- One key: the API key (`axon_k_...`) opens `/mcp` as `Authorization: Bearer`. The dashboard uses the same key. It sends the key in the WebSocket `Sec-WebSocket-Protocol` header, never in the URL.
 - Optional IP allowlist and per-IP rate limiting
 - Command denylist and read-only mode
-- Interactive commands: a command that waits for input returns `input_required`. Use `send_input` or `cancel_command` to continue.
-- Secret input: a password that you type in the dashboard goes to the command. Axon replaces that text with `[redacted]` in everything the agent can read, in the dashboard and in the logs. This is best effort. See [Security notes](#security-notes).
+- Interactive commands: a command that waits for input returns `input_required`. The agent answers a confirmation prompt with `send_input` (for example `yes`), or stops the command with `cancel_command`. A command that asks for a password cannot be answered through Axon.
 - Audit log (JSON lines) for every tool call
-- Web dashboard with a live view of agent activity
+- Read-only web dashboard with a live view of agent activity
 - Refuses to run as root. Commands that contain `sudo` never run. The dashboard shows them so that you can run them yourself.
 - Optional Cloudflare tunnel for access without port forwarding
 
@@ -57,16 +56,16 @@ make build                    # also rebuilds the dashboard (needs pnpm)
 On the remote machine:
 
 ```bash
-axon init    # creates ~/.axon/ with the keys, TLS certificate and denylist. Shows the operator key once.
+axon init    # creates ~/.axon/ with the API key, TLS certificate and denylist
 axon serve   # listens on https://0.0.0.0:8443/mcp
 axon update. # update a build from a git clone (Linux or macOS)
 ```
 
-**Save the operator key when `axon init` shows it.** Axon keeps only a hash and cannot show the key again. Use a password manager. `axon keygen -operator` makes a new one.
+`axon init` and `axon serve` show the API key. The agent and the dashboard use this one key. Treat it like a password. `axon keygen` makes a new one.
 
-`axon serve` prints the API key (for the agent), the TLS fingerprint and ready-to-paste client configuration. It also opens the dashboard in your browser. The address has no key: paste the operator key into the page. Use `-no-browser` to skip opening the browser.
+`axon serve` prints the API key, the TLS fingerprint and ready-to-paste client configuration. It also opens the dashboard in your browser. The address has no key: paste the API key into the page. Use `-no-browser` to skip opening the browser.
 
-If you upgrade from a version with one key, run `axon init` once. It makes the operator key, shows it once, and keeps the rest.
+If you upgrade from version 1.x, you do not need to change anything. The operator key is gone: the dashboard now takes the API key. Axon ignores the old `operator_key_hash` line in `config.yaml` and drops it the next time it saves the file.
 
 To update a build from a git clone (Linux or macOS), run `axon update`. It pulls the source and rebuilds what is stale. Restart `axon serve` to run the new build. Add `-check` to preview the changes. See [Commands](#commands).
 
@@ -102,9 +101,11 @@ Restart the agent after you change its MCP configuration.
 
 ## Dashboard
 
-The dashboard is at the origin of the server, for example `https://YOUR_REMOTE_HOST:8443/` (not `/mcp`). Enter the operator key to connect (`axon init` showed it once). Do not give the operator key to the agent. With the self-signed certificate, accept the browser warning first.
+The dashboard is at the origin of the server, for example `https://YOUR_REMOTE_HOST:8443/` (not `/mcp`). Enter the API key to connect. With the self-signed certificate, accept the browser warning first.
 
-The dashboard lists the commands from the agent, newest first. If a command needs `sudo`, a dialog shows the command for you to copy and run.
+The dashboard only watches. It lists the commands from the agent, newest first. It has no input field and no cancel button. If a command waits for input, the dashboard shows a notice, and the agent answers it. If a command needs `sudo`, a dialog shows the command for you to copy and run.
+
+To stop the agent, close its connection or press `Ctrl+C` in the terminal that runs `axon serve`.
 
 ## Cloudflare Tunnel
 
@@ -164,7 +165,7 @@ cd web && VITE_DEMO_MODE=true pnpm dev
 
 | Command | Description |
 |---|---|
-| `axon init` | Create the config, API key, operator key (shown once), TLS certificate and denylist |
+| `axon init` | Create the config, API key, TLS certificate and denylist |
 | `axon serve` | Start the HTTPS MCP server |
 | `axon serve -dev` | Plain HTTP on `127.0.0.1`, for local development |
 | `axon serve -tunnel` | Start a Cloudflare quick tunnel (implies `-dev`) |
@@ -174,7 +175,6 @@ cd web && VITE_DEMO_MODE=true pnpm dev
 | `axon serve -no-browser` | Do not open the dashboard |
 | `axon status` | Show the config paths and the certificate fingerprint |
 | `axon keygen` | Rotate the API key (restart `axon serve` to apply it) |
-| `axon keygen -operator` | Make a new operator key and show it once (restart `axon serve` to apply it) |
 | `axon update` | Pull the latest source and rebuild what is stale (restart `axon serve` to apply it) |
 | `axon update -check` | Show what an update would change, and change nothing |
 | `axon update -force` | Update and discard local changes and commits |
@@ -208,7 +208,7 @@ Axon merges `~/.axon/config.yaml` over the built-in defaults.
 | `grep` | Regex search under a directory |
 | `glob` | Find files by base-name pattern under a directory |
 | `system_info` | Host, CPU, memory and disk summary |
-| `send_input` | Send input to a process that returned `input_required` |
+| `send_input` | Send input to a process that returned `input_required`, for example `yes` for a confirmation. Do not send passwords. |
 | `cancel_command` | Stop a tracked process |
 
 ## Security notes
@@ -217,8 +217,8 @@ Axon gives an agent a shell on your machine. The API key is the main boundary: a
 
 [docs/SECURITY.md](docs/SECURITY.md) has two parts:
 
-- **Security notes**: how to run Axon safely. It covers key handling, a dedicated unprivileged user, secret input, tunnel mode and the denylist.
-- **Security review**: the findings of a full review (high, medium and low), the guarantees of the secret-input path, and a priority list of fixes.
+- **Security notes**: how to run Axon safely. It covers key handling, a dedicated unprivileged user, passwords in commands, tunnel mode and the denylist.
+- **Security review**: the findings of a full review (high, medium and low), the record of what version 2.0.0 removed, and a priority list of fixes.
 
 For how the parts fit together, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 

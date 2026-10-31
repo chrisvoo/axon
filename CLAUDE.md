@@ -8,8 +8,8 @@ Read the document that matches your task before you change code. This file keeps
 
 | Document | Read it when you touch | Contents |
 |---|---|---|
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | `internal/server`, `internal/mcp`, `internal/tools`, `internal/hub`, events | Actors, stack, request flow, shell call sequence, operator secrets, events, trust limits |
-| [docs/SECURITY.md](docs/SECURITY.md) | keys, denylist, `sudo` check, secret store, TLS, audit log | Operating notes, review findings (high, medium, low), guarantees of the secret path |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | `internal/server`, `internal/mcp`, `internal/tools`, `internal/hub`, events | Actors, stack, request flow, shell call sequence, credentials, events, trust limits |
+| [docs/SECURITY.md](docs/SECURITY.md) | key, denylist, `sudo` check, TLS, audit log | Operating notes, review findings (high, medium, low), what 2.0.0 removed |
 | [README.md](README.md) | commands, flags, config keys, MCP tools | User-facing setup and reference |
 
 Keep the documents true. A change that fixes a finding updates its entry in `docs/SECURITY.md`. A change to a command, flag, config key or tool updates `README.md` and the commands in this file.
@@ -18,17 +18,17 @@ Keep the documents true. A change that fixes a finding updates its entry in `doc
 
 ```bash
 make build                       # compile the dashboard, then the Go binary (./axon)
-./axon init                      # first time only: API key, operator key, TLS cert, denylist in ~/.axon/
+./axon init                      # first time only: API key, TLS cert, denylist in ~/.axon/
 make dev                         # plain HTTP on 127.0.0.1, no TLS, for local development
 ./axon update                    # later: pull the source and rebuild what is stale
 ```
 
-`axon init` shows the operator key once. The config keeps only a hash. `axon update` never restarts `axon serve`: restart it to run the new build.
+`axon init` and `axon serve` show the one API key. The agent and the dashboard both use it. `axon update` never restarts `axon serve`: restart it to run the new build.
 
 ## Commands
 
 ```bash
-# First-time setup (generates API key, operator key, TLS cert, denylist in ~/.axon/).
+# First-time setup (generates API key, TLS cert, denylist in ~/.axon/).
 ./axon init
 
 # Pull the latest source and rebuild what is stale
@@ -70,12 +70,12 @@ A change to documents or tests only does not bump the version. `axon update` sho
 
 ## Architecture in brief
 
-Axon is a **remote MCP (Model Context Protocol) server**. It exposes the machine's shell and files as MCP tools. Two keys secure it (the agent's API key and the operator's key), and optionally TLS. For the full picture and diagrams, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Axon is a **remote MCP (Model Context Protocol) server**. It exposes the machine's shell and files as MCP tools. One API key secures it (the agent and the read-only dashboard share it), and optionally TLS. For the full picture and diagrams, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ```
 AI client (Claude / Cursor)
-  → POST /mcp (Bearer API key). The dashboard uses the operator key on /ws and /api/*.
-  → internal/server — IP allowlist, rate limit, then the key check of the route (requireKey)
+  → POST /mcp (Bearer API key). The dashboard uses the same key on /ws (Sec-WebSocket-Protocol header).
+  → internal/server — IP allowlist, rate limit, then the API key check
   → internal/mcp — JSON-RPC 2.0 dispatch (handleToolsCall)
   → internal/tools — shell / file / search execution
   → events.Bus.Publish() → Hub → WebSocket broadcast → React dashboard
@@ -86,11 +86,11 @@ AI client (Claude / Cursor)
 | `cmd/axon` | CLI entry point: `init`, `serve`, `status`, `keygen`, `update`, `version`; terminal banner in `startup.go` |
 | `internal/mcp` | JSON-RPC 2.0 handler; all tool dispatch lives in `handleToolsCall` |
 | `internal/tools` | Tool implementations: shell, read/write/edit file, grep, glob, system_info, send_input, cancel_command |
-| `internal/server` | HTTP(S) server, routes (`/mcp`, `/ws`, `/api/cancel`, `/api/input`, `/api/agent-config`), and the MCP client-config snippet builders used by `cmd/axon` |
+| `internal/server` | HTTP(S) server, routes (`/mcp`, `/ws`), and the MCP client-config snippet builders used by `cmd/axon` |
 | `internal/hub` | WebSocket fan-out; subscribes to `events.Bus` and pushes to all dashboard clients |
 | `internal/events` | Simple pub/sub bus (buffered channels, drops on full) |
 | `internal/security` | Bearer-token check, denylist, rate limiter, TLS, IP allowlist |
-| `internal/config` | YAML config loader/saver; embeds the default config and denylist; key rules (`HashKey`, `OperatorKeyMatches`, `Validate`); paths from `internal/paths` |
+| `internal/config` | YAML config loader/saver; embeds the default config and denylist; `Validate` (the API key must exist); paths from `internal/paths` |
 | `internal/audit` | JSON-lines audit log of tool calls |
 | `internal/update` | `axon update`: git sync, stale-build assessment, rebuild (single file, `Exec`/`Look` seams for tests) |
 | `internal/tunnel` | Cloudflare tunnel integration (`trycloudflare` quick tunnel or named tunnel) |
@@ -111,21 +111,15 @@ These rules are easy to break by accident. The reasons are in [docs/ARCHITECTURE
 - **Read-only mode**: if `cfg.ReadOnly` is true, `shell`, `write_file` and `edit_file` are disabled.
 - **Denylist**: `~/.axon/denylist.txt` is loaded at startup (`axon init` writes it from the embedded `internal/config/denylist.txt`). A command that contains a pattern as a substring is blocked. A missing file means an empty denylist.
 
-### Keys and dashboard
+### Key and dashboard
 
-- The API key opens `/mcp` only. The operator key opens `/ws` (as the `?key=` query, checked in `hub.ServeWS`), `/api/input`, `/api/cancel` and `/api/agent-config` (as a Bearer token, `requireKey` in `server.go`).
-- The agent must never get the operator key: it can register secrets and answer prompts. The config stores only `OperatorKeyHash` (`config.HashKey`, SHA-256). `Config.OperatorKeyMatches` hashes the token, so the stored hash does not work as a key. `Config.Validate` requires two different keys.
-- The agent can read `config.yaml`. Never store or print the operator key anywhere other than once in `axon init` and `axon keygen -operator` (`ensureKeys`, `newOperatorKey`).
-- The dashboard reads the key from the URL hash (`App.tsx`), keeps it in `sessionStorage` and removes the hash. `ConnectScreen` takes a pasted key. `axon serve` opens the dashboard without a key in the address.
-- `GET /api/agent-config` gives the API key to the dashboard for its setup snippet.
+- There is one key: `cfg.APIKey`. It opens `/mcp` (Bearer header, checked in `server.go`) and `/ws` (checked in `hub.ServeWS`). `security.ConstantTimeEqual` compares it.
+- The dashboard is read-only. There is no route that writes: no `/api/input`, `/api/cancel` or `/api/agent-config`. Do not add one without a new review in `docs/SECURITY.md`.
+- `/ws` takes the key from the `Sec-WebSocket-Protocol` request header: the client offers `axon.v1` and `axon.key.<key>`. `hub.Subprotocol`, `hub.KeyProtocolPrefix` and `hub.CloseUnauthorized` have copies in `web/src/hooks/useAxonSocket.ts`. Keep both sides in step. The key never goes in the URL, and the server never echoes it. A missing or wrong key completes the handshake and closes with code 4401 (a browser cannot read the HTTP status of a failed handshake). The dashboard then asks for a new key.
+- The agent can read `config.yaml`, and the key is in it. The agent already holds the key.
+- The dashboard reads the key from the URL hash (`App.tsx`), keeps it in `sessionStorage` (`API_KEY_STORAGE`) and removes the hash. `ConnectScreen` takes a pasted key. `axon serve` opens the dashboard without a key in the address.
 - The hub fans out every `events.Event` (tool calls, results, input_required, system stats) to all clients. `events.Bus` drops events when a subscriber buffer is full.
-
-### Operator secrets
-
-- The dashboard sends `POST /api/input` with `secret` (default true). `tools.SendOperatorInput` registers each typed line in the `ProcManager` secret store (`AddSecret`, with its JSON-escaped form) before it writes to the pty.
-- `AddSecret` needs a live process: an empty, unknown or ended process registers nothing, and `/api/input` rejects an empty `process_id`. A secret lasts as long as its process, then 10 minutes (`releaseSecretsLocked`). The store is shared by all processes.
-- Anything the agent or the dashboard can read must pass `ProcManager.Redact`: shell results (`RunShell`), `send_input` and finished results, and the final `text` of every tool call in `mcp.handleToolsCall` (also errors and event details). The audit logger redacts `Detail` through `SetRedactor`.
-- Never return `TrackedProc.snapshot()` or `OutBuf` directly. Events and audit lines never contain the input text. Redaction is best effort: exact text only.
+- Axon does not hide text. Shell results, tool text, events and audit lines show exactly what the agent sent and received. A command that needs a password cannot run through Axon: the agent cancels it.
 
 ### Update flow (`axon update`)
 

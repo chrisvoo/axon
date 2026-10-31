@@ -4,8 +4,6 @@ export type AxonEventType =
   | 'tool_result'
   | 'input_required'
   | 'system_stats'
-  | 'dashboard_input'
-  | 'dashboard_cancel'
   | 'privileged_commands'
 
 export type AxonEvent = {
@@ -32,5 +30,5 @@ export type ActivityRow = {
   createdAt: number
 }
 
-// The dashboard holds the operator key. The agent's API key is a different key.
-export const API_KEY_STORAGE = 'axon_operator_key'
+// The dashboard and the agent use the same API key. The dashboard keeps it for the tab only.
+export const API_KEY_STORAGE = 'axon_api_key'

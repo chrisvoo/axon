@@ -19,13 +19,13 @@
 
   <rect x="640" y="24" width="290" height="58" rx="9" fill="#EDEAE3"/>
   <text x="785" y="49" text-anchor="middle" font-size="15" font-weight="600" fill="#2b2a28">Operator</text>
-  <text x="785" y="68" text-anchor="middle" font-size="12" fill="#5c5a55">Browser dashboard</text>
+  <text x="785" y="68" text-anchor="middle" font-size="12" fill="#5c5a55">Browser dashboard (watch only)</text>
 
   <!-- Actor to transport -->
   <line x1="175" y1="84" x2="175" y2="118" stroke="#8a8a8a" stroke-width="1.5" marker-start="url(#g)" marker-end="url(#g)"/>
   <text x="190" y="105" font-size="11.5" fill="#a0a0a4">JSON-RPC + API key (axon_k_)</text>
   <line x1="785" y1="84" x2="785" y2="118" stroke="#8a8a8a" stroke-width="1.5" marker-start="url(#g)" marker-end="url(#g)"/>
-  <text x="770" y="105" text-anchor="end" font-size="11.5" fill="#a0a0a4">HTTP + WebSocket + operator key (axon_o_)</text>
+  <text x="770" y="105" text-anchor="end" font-size="11.5" fill="#a0a0a4">WebSocket + the same API key, in a header</text>
 
   <!-- Transport -->
   <rect x="30" y="120" width="900" height="44" rx="9" fill="#FFFFFF"/>
@@ -37,7 +37,7 @@
 
   <!-- Shared guards -->
   <rect x="30" y="200" width="900" height="46" rx="9" fill="#D3F2E6" stroke="#1D9E75" stroke-width="1"/>
-  <text x="480" y="221" text-anchor="middle" font-size="14" font-weight="600" fill="#0F5E48">Shared guards on /mcp, /ws and /api/*</text>
+  <text x="480" y="221" text-anchor="middle" font-size="14" font-weight="600" fill="#0F5E48">Shared guards on /mcp and /ws</text>
   <text x="480" y="238" text-anchor="middle" font-size="11.5" fill="#1B7A5C">IP allowlist, then rate limit</text>
 
   <!-- Arrows into the two key checks -->
@@ -47,22 +47,22 @@
   <!-- Row D: key checks and config -->
   <rect x="30" y="270" width="290" height="66" rx="9" fill="#D3F2E6" stroke="#1D9E75" stroke-width="1"/>
   <text x="175" y="292" text-anchor="middle" font-size="14" font-weight="600" fill="#0F5E48">API key check</text>
-  <text x="175" y="310" text-anchor="middle" font-size="11.5" fill="#1B7A5C">POST /mcp only</text>
+  <text x="175" y="310" text-anchor="middle" font-size="11.5" fill="#1B7A5C">POST /mcp: Authorization Bearer header</text>
   <text x="175" y="326" text-anchor="middle" font-size="11.5" fill="#1B7A5C">constant-time compare with the API key</text>
 
   <rect x="345" y="270" width="270" height="66" rx="9" fill="#EDEAE3"/>
   <text x="480" y="292" text-anchor="middle" font-size="14" font-weight="600" fill="#2b2a28">config.yaml (mode 0600)</text>
   <text x="480" y="310" text-anchor="middle" font-size="11.5" fill="#5c5a55">API key: clear text</text>
-  <text x="480" y="326" text-anchor="middle" font-size="11.5" fill="#5c5a55">operator key: SHA-256 hash only</text>
+  <text x="480" y="326" text-anchor="middle" font-size="11.5" fill="#5c5a55">one key for the agent and the dashboard</text>
   <line x1="345" y1="303" x2="322" y2="303" stroke="#8a8a8a" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#g)"/>
   <line x1="615" y1="303" x2="638" y2="303" stroke="#8a8a8a" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#g)"/>
 
   <rect x="640" y="270" width="290" height="66" rx="9" fill="#D6E6FA" stroke="#3B82D6" stroke-width="1"/>
-  <text x="785" y="292" text-anchor="middle" font-size="14" font-weight="600" fill="#1A4B8C">Operator key check</text>
-  <text x="785" y="310" text-anchor="middle" font-size="11.5" fill="#2E67B3">/ws · /api/input · /api/cancel · agent-config</text>
-  <text x="785" y="326" text-anchor="middle" font-size="11.5" fill="#2E67B3">token is hashed, then compared to the hash</text>
+  <text x="785" y="292" text-anchor="middle" font-size="14" font-weight="600" fill="#1A4B8C">API key check (WebSocket)</text>
+  <text x="785" y="310" text-anchor="middle" font-size="11.5" fill="#2E67B3">GET /ws: Sec-WebSocket-Protocol header</text>
+  <text x="785" y="326" text-anchor="middle" font-size="11.5" fill="#2E67B3">wrong key: close code 4401, no events</text>
 
-  <!-- Row E -->
+  <!-- Row E: MCP handler, event bus, hub -->
   <line x1="175" y1="336" x2="175" y2="366" stroke="#1D9E75" stroke-width="1.6" marker-end="url(#m)"/>
   <line x1="785" y1="336" x2="785" y2="366" stroke="#4A93E8" stroke-width="1.6" marker-end="url(#b)"/>
 
@@ -71,57 +71,45 @@
   <text x="175" y="409" text-anchor="middle" font-size="11.5" fill="#1B7A5C">JSON-RPC 2.0 dispatch</text>
 
   <rect x="345" y="366" width="270" height="58" rx="9" fill="#FCE4CC" stroke="#D9822B" stroke-width="1"/>
-  <text x="480" y="391" text-anchor="middle" font-size="14" font-weight="600" fill="#7A3E10">Audit log</text>
-  <text x="480" y="409" text-anchor="middle" font-size="11.5" fill="#9A5418">JSON lines, mode 0600, redacted</text>
+  <text x="480" y="391" text-anchor="middle" font-size="14" font-weight="600" fill="#7A3E10">Event bus</text>
+  <text x="480" y="409" text-anchor="middle" font-size="11.5" fill="#9A5418">in-process pub/sub</text>
 
-  <rect x="640" y="366" width="290" height="58" rx="9" fill="#D6E6FA" stroke="#3B82D6" stroke-width="1"/>
-  <text x="785" y="391" text-anchor="middle" font-size="14" font-weight="600" fill="#1A4B8C">Operator routes</text>
-  <text x="785" y="409" text-anchor="middle" font-size="11.5" fill="#2E67B3">answer prompt · cancel · setup snippet</text>
+  <rect x="640" y="366" width="290" height="58" rx="9" fill="#FCE4CC" stroke="#D9822B" stroke-width="1"/>
+  <text x="785" y="391" text-anchor="middle" font-size="14" font-weight="600" fill="#7A3E10">WebSocket hub</text>
+  <text x="785" y="409" text-anchor="middle" font-size="11.5" fill="#9A5418">fan-out to dashboards, read-only</text>
 
   <line x1="320" y1="395" x2="343" y2="395" stroke="#D9822B" stroke-width="1.6" marker-end="url(#o)"/>
-  <line x1="640" y1="395" x2="617" y2="395" stroke="#D9822B" stroke-width="1.6" marker-end="url(#o)"/>
+  <line x1="615" y1="395" x2="638" y2="395" stroke="#D9822B" stroke-width="1.6" marker-end="url(#o)"/>
 
-  <!-- Row F -->
+  <!-- Hub back to the operator -->
+  <path d="M930 395 H958 V53 H932" fill="none" stroke="#D9822B" stroke-width="1.6" marker-end="url(#o)"/>
+  <text transform="translate(972 224) rotate(-90)" text-anchor="middle" font-size="11" fill="#D9822B">events to the dashboard</text>
+
+  <!-- Row F: policy and audit log -->
   <line x1="175" y1="424" x2="175" y2="452" stroke="#1D9E75" stroke-width="1.6" marker-end="url(#m)"/>
-  <line x1="785" y1="424" x2="785" y2="452" stroke="#4A93E8" stroke-width="1.6" marker-end="url(#b)"/>
 
   <rect x="30" y="452" width="290" height="58" rx="9" fill="#D3F2E6" stroke="#1D9E75" stroke-width="1"/>
   <text x="175" y="477" text-anchor="middle" font-size="14" font-weight="600" fill="#0F5E48">Policy</text>
   <text x="175" y="495" text-anchor="middle" font-size="11.5" fill="#1B7A5C">sudo, denylist, read-only</text>
 
   <rect x="345" y="452" width="270" height="58" rx="9" fill="#FCE4CC" stroke="#D9822B" stroke-width="1"/>
-  <text x="480" y="477" text-anchor="middle" font-size="14" font-weight="600" fill="#7A3E10">Event bus</text>
-  <text x="480" y="495" text-anchor="middle" font-size="11.5" fill="#9A5418">in-process pub/sub</text>
+  <text x="480" y="477" text-anchor="middle" font-size="14" font-weight="600" fill="#7A3E10">Audit log</text>
+  <text x="480" y="495" text-anchor="middle" font-size="11.5" fill="#9A5418">JSON lines, mode 0600</text>
 
   <line x1="320" y1="481" x2="343" y2="481" stroke="#D9822B" stroke-width="1.6" marker-end="url(#o)"/>
-  <text x="30" y="445" font-size="10.5" fill="#D9822B" opacity="0">.</text>
 
-  <rect x="640" y="452" width="290" height="94" rx="9" fill="#F9D9DE" stroke="#D64561" stroke-width="1"/>
-  <text x="785" y="477" text-anchor="middle" font-size="14" font-weight="600" fill="#8A1F35">Secret store (ProcManager)</text>
-  <text x="785" y="496" text-anchor="middle" font-size="11.5" fill="#A8344C">AddSecret needs a live process</text>
-  <text x="785" y="513" text-anchor="middle" font-size="11.5" fill="#A8344C">Redact hides the secrets in shell results,</text>
-  <text x="785" y="529" text-anchor="middle" font-size="11.5" fill="#A8344C">send_input, tool text and audit detail</text>
+  <text x="785" y="486" text-anchor="middle" font-size="11.5" font-style="italic" fill="#9a9a9e">The dashboard only watches.</text>
+  <text x="785" y="503" text-anchor="middle" font-size="11.5" font-style="italic" fill="#9a9a9e">It sends nothing back to Axon.</text>
 
   <!-- Row G -->
   <line x1="175" y1="510" x2="175" y2="538" stroke="#1D9E75" stroke-width="1.6" marker-end="url(#m)"/>
-  <line x1="480" y1="510" x2="480" y2="538" stroke="#D9822B" stroke-width="1.6" marker-end="url(#o)"/>
 
   <rect x="30" y="538" width="290" height="58" rx="9" fill="#D3F2E6" stroke="#1D9E75" stroke-width="1"/>
   <text x="175" y="563" text-anchor="middle" font-size="14" font-weight="600" fill="#0F5E48">Tools</text>
   <text x="175" y="581" text-anchor="middle" font-size="11.5" fill="#1B7A5C">shell, files, grep, glob</text>
 
-  <rect x="345" y="538" width="270" height="58" rx="9" fill="#FCE4CC" stroke="#D9822B" stroke-width="1"/>
-  <text x="480" y="563" text-anchor="middle" font-size="14" font-weight="600" fill="#7A3E10">WebSocket hub</text>
-  <text x="480" y="581" text-anchor="middle" font-size="11.5" fill="#9A5418">fan-out to dashboards</text>
-
-  <!-- Hub back to the operator -->
-  <path d="M615 567 H958 V53 H932" fill="none" stroke="#D9822B" stroke-width="1.6" marker-end="url(#o)"/>
-  <text x="948" y="560" text-anchor="end" font-size="11" fill="#D9822B" transform="rotate(0)">events to the dashboard</text>
-
   <!-- Host OS -->
   <line x1="175" y1="596" x2="175" y2="630" stroke="#1D9E75" stroke-width="1.6" marker-end="url(#m)"/>
-  <line x1="785" y1="546" x2="785" y2="630" stroke="#4A93E8" stroke-width="1.6" marker-end="url(#b)"/>
-  <text x="797" y="612" font-size="10.5" fill="#4A93E8">answer is written to the pty</text>
 
   <rect x="30" y="630" width="900" height="58" rx="9" fill="#EDEAE3"/>
   <text x="480" y="655" text-anchor="middle" font-size="14" font-weight="600" fill="#2b2a28">Host OS</text>
@@ -137,12 +125,10 @@
   <!-- Legend -->
   <rect x="30" y="814" width="14" height="14" rx="3" fill="#D3F2E6" stroke="#1D9E75"/>
   <text x="52" y="826" font-size="11.5" fill="#a0a0a4">Agent request path</text>
-  <rect x="190" y="814" width="14" height="14" rx="3" fill="#D6E6FA" stroke="#3B82D6"/>
-  <text x="212" y="826" font-size="11.5" fill="#a0a0a4">Operator path</text>
-  <rect x="320" y="814" width="14" height="14" rx="3" fill="#F9D9DE" stroke="#D64561"/>
-  <text x="342" y="826" font-size="11.5" fill="#a0a0a4">Secrets (hidden from the agent)</text>
-  <rect x="540" y="814" width="14" height="14" rx="3" fill="#FCE4CC" stroke="#D9822B"/>
-  <text x="562" y="826" font-size="11.5" fill="#a0a0a4">Event and audit path</text>
-  <rect x="720" y="814" width="14" height="14" rx="3" fill="#EDEAE3"/>
-  <text x="742" y="826" font-size="11.5" fill="#a0a0a4">Actors, config, host</text>
+  <rect x="200" y="814" width="14" height="14" rx="3" fill="#D6E6FA" stroke="#3B82D6"/>
+  <text x="222" y="826" font-size="11.5" fill="#a0a0a4">Dashboard path</text>
+  <rect x="360" y="814" width="14" height="14" rx="3" fill="#FCE4CC" stroke="#D9822B"/>
+  <text x="382" y="826" font-size="11.5" fill="#a0a0a4">Event and audit path</text>
+  <rect x="560" y="814" width="14" height="14" rx="3" fill="#EDEAE3"/>
+  <text x="582" y="826" font-size="11.5" fill="#a0a0a4">Actors, config, host</text>
 </svg>

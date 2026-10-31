@@ -73,7 +73,7 @@ const TEST_FAILURE_OUTPUT = [
   'exit status 1',
 ].join('\n')
 
-// Interactive prompt to exercise input_required + InputPrompt dialog
+// Interactive prompt to exercise input_required and its read-only notice
 const INTERACTIVE_LAST_OUTPUT = 'Target directory [/usr/local]: '
 
 export const SCENARIOS: Scenario[] = [

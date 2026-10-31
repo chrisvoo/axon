@@ -19,19 +19,8 @@ type Entry struct {
 
 // Logger appends JSON lines to a file.
 type Logger struct {
-	path   string
-	mu     sync.Mutex
-	redact func(string) string
-}
-
-// SetRedactor sets a function that hides secrets in every entry's detail.
-func (l *Logger) SetRedactor(f func(string) string) {
-	if l == nil {
-		return
-	}
-	l.mu.Lock()
-	l.redact = f
-	l.mu.Unlock()
+	path string
+	mu   sync.Mutex
 }
 
 // New creates an audit logger.
@@ -58,9 +47,6 @@ func (l *Logger) Log(e Entry) {
 	e.Time = e.Time.UTC()
 	l.mu.Lock()
 	defer l.mu.Unlock()
-	if l.redact != nil {
-		e.Detail = l.redact(e.Detail)
-	}
 	data, err := json.Marshal(e)
 	if err != nil {
 		return

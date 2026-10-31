@@ -1,10 +1,7 @@
 package config
 
 import (
-	"crypto/sha256"
-	"crypto/subtle"
 	_ "embed"
-	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -46,10 +43,7 @@ type Config struct {
 	DenylistFile  string   `yaml:"denylist_file"`
 	CertFile      string   `yaml:"cert_file"`
 	KeyFile       string   `yaml:"key_file"`
-	APIKey        string   `yaml:"api_key"` // the AI agent's key for /mcp
-	// OperatorKeyHash is the hash of the dashboard's key for /ws and /api/*. The
-	// key itself is shown once and never stored: the agent can read this file.
-	OperatorKeyHash string `yaml:"operator_key_hash"`
+	APIKey        string   `yaml:"api_key"` // the one key: /mcp (Bearer header) and /ws (subprotocol)
 
 	configDir string
 }
@@ -144,32 +138,10 @@ func (c *Config) IdleTimeoutDuration() time.Duration {
 	return d
 }
 
-// HashKey returns the stored form of a key. A key is 256 random bits, so a
-// fast hash is enough.
-func HashKey(key string) string {
-	sum := sha256.Sum256([]byte(key))
-	return "sha256:" + hex.EncodeToString(sum[:])
-}
-
-// OperatorKeyMatches reports whether token is the operator key. The check hashes
-// the token, so the stored hash itself is not accepted as a key.
-func (c *Config) OperatorKeyMatches(token string) bool {
-	if token == "" || c.OperatorKeyHash == "" {
-		return false
-	}
-	return subtle.ConstantTimeCompare([]byte(HashKey(token)), []byte(c.OperatorKeyHash)) == 1
-}
-
-// Validate checks the two keys. They must exist and differ: the agent must not
-// hold the key that registers secrets and answers prompts.
+// Validate checks that the API key exists.
 func (c *Config) Validate() error {
-	switch {
-	case c.APIKey == "":
+	if c.APIKey == "" {
 		return fmt.Errorf("missing API key: run axon init")
-	case c.OperatorKeyHash == "":
-		return fmt.Errorf("missing operator key: run axon init")
-	case c.OperatorKeyMatches(c.APIKey):
-		return fmt.Errorf("the API key and the operator key must be different")
 	}
 	return nil
 }

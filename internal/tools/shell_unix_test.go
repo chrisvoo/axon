@@ -5,8 +5,6 @@ package tools
 import (
 	"context"
 	"encoding/json"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -104,9 +102,9 @@ func finishedResult(t *testing.T, pm *ProcManager, id string) ShellResult {
 	return res
 }
 
-// The operator answers in the dashboard (POST /api/input), the command ends,
-// and the agent then asks for the result with send_input.
-func TestRunShell_AgentReadsResultAfterOperatorAnswers(t *testing.T) {
+// The agent answers the prompt with send_input, the command ends, and the agent
+// then asks for the result with send_input again.
+func TestRunShell_AgentReadsResultAfterItAnswers(t *testing.T) {
 	cfg := &config.Config{ShellTimeout: "30s", InputStallSec: 1}
 	pm := NewProcManager()
 
@@ -117,11 +115,11 @@ func TestRunShell_AgentReadsResultAfterOperatorAnswers(t *testing.T) {
 	if res.Status != "input_required" {
 		t.Fatalf("expected input_required, got %+v", res)
 	}
-	if _, err := SendInput(res.ProcessID, "hello\n", pm); err != nil { // the operator
+	if _, err := SendInput(res.ProcessID, "hello\n", pm); err != nil {
 		t.Fatal(err)
 	}
 
-	got := finishedResult(t, pm, res.ProcessID) // the agent
+	got := finishedResult(t, pm, res.ProcessID)
 	if got.Status != "completed" || !strings.Contains(got.Stdout, "got:hello") {
 		t.Fatalf("unexpected result: %+v", got)
 	}
@@ -160,97 +158,5 @@ func TestRunShell_AgentReadsTimeoutResult(t *testing.T) {
 	got := finishedResult(t, pm, res.ProcessID)
 	if got.Status != "error" || got.ErrorMessage != "command timed out" {
 		t.Fatalf("unexpected result: %+v", got)
-	}
-}
-
-// The operator types a secret in the dashboard. Whether the terminal echoes it
-// or the program prints it, the agent must only ever see [redacted].
-func TestRunShell_OperatorSecretNeverReachesTheAgent(t *testing.T) {
-	const secret = "hunter2-Zq9"
-	cfg := &config.Config{ShellTimeout: "30s", InputStallSec: 1}
-
-	t.Run("echoed by the terminal while the command runs", func(t *testing.T) {
-		pm := NewProcManager()
-		res, err := RunShell(context.Background(), cfg, nil, false, "read x; sleep 20", pm)
-		if err != nil || res.Status != "input_required" {
-			t.Fatalf("expected input_required, got %+v, %v", res, err)
-		}
-		defer func() { _, _ = CancelCommand(res.ProcessID, pm) }()
-
-		reply, err := SendOperatorInput(res.ProcessID, secret+"\n", true, pm)
-		if err != nil {
-			t.Fatal(err)
-		}
-		if strings.Contains(string(reply), secret) {
-			t.Fatalf("the dashboard reply leaks the secret: %s", reply)
-		}
-
-		seenRedacted := false
-		for i := 0; i < 20 && !seenRedacted; i++ {
-			b, err := SendInput(res.ProcessID, "", pm) // the agent
-			if err != nil {
-				t.Fatal(err)
-			}
-			if strings.Contains(string(b), secret) {
-				t.Fatalf("the agent sees the secret: %s", b)
-			}
-			seenRedacted = strings.Contains(string(b), "[redacted]")
-			time.Sleep(50 * time.Millisecond)
-		}
-		if !seenRedacted {
-			t.Fatal("expected the echoed secret to show as [redacted]")
-		}
-	})
-
-	t.Run("printed by the program after the command ends", func(t *testing.T) {
-		pm := NewProcManager()
-		res, err := RunShell(context.Background(), cfg, nil, false, "read x; echo got:$x", pm)
-		if err != nil || res.Status != "input_required" {
-			t.Fatalf("expected input_required, got %+v, %v", res, err)
-		}
-		if _, err := SendOperatorInput(res.ProcessID, secret+"\n", true, pm); err != nil {
-			t.Fatal(err)
-		}
-
-		got := finishedResult(t, pm, res.ProcessID) // the agent
-		if strings.Contains(got.Stdout, secret) {
-			t.Fatalf("the agent sees the secret: %q", got.Stdout)
-		}
-		if !strings.Contains(got.Stdout, "got:[redacted]") {
-			t.Fatalf("expected got:[redacted], got %q", got.Stdout)
-		}
-	})
-}
-
-// The program writes what the operator typed to a file. The agent then reads
-// that file with a new command. The secret is not tied to the first process.
-func TestRunShell_SecretIsHiddenInAnotherCommand(t *testing.T) {
-	const secret = "hunter2-Zq9"
-	cfg := &config.Config{ShellTimeout: "30s", InputStallSec: 1}
-	pm := NewProcManager()
-	file := filepath.Join(t.TempDir(), "saved.txt")
-
-	res, err := RunShell(context.Background(), cfg, nil, false, `read -r x; printf '%s\n' "$x" > `+file+`; sleep 20`, pm)
-	if err != nil || res.Status != "input_required" {
-		t.Fatalf("expected input_required, got %+v, %v", res, err)
-	}
-	defer func() { _, _ = CancelCommand(res.ProcessID, pm) }()
-	if _, err := SendOperatorInput(res.ProcessID, secret+"\n", true, pm); err != nil {
-		t.Fatal(err)
-	}
-	waitFor(t, "the program to write the file", 5*time.Second, func() bool {
-		b, err := os.ReadFile(file)
-		return err == nil && strings.Contains(string(b), secret)
-	})
-
-	read, err := RunShell(context.Background(), cfg, nil, false, "cat "+file, pm) // the agent
-	if err != nil {
-		t.Fatal(err)
-	}
-	if strings.Contains(read.Stdout, secret) {
-		t.Fatalf("the agent reads the secret with a new command: %q", read.Stdout)
-	}
-	if !strings.Contains(read.Stdout, "[redacted]") {
-		t.Fatalf("expected [redacted], got %q", read.Stdout)
 	}
 }

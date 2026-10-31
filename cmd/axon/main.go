@@ -25,7 +25,7 @@ import (
 	"github.com/chrisvoo/axon/internal/update"
 )
 
-const version = "1.2.5" // semantic version: see "Versioning" in CLAUDE.md
+const version = "2.0.0" // semantic version: see "Versioning" in CLAUDE.md
 
 // Specific styles for main.go (reuses cyanStyle, dimStyle, boldStyle from startup.go)
 var (
@@ -75,8 +75,7 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `axon %s — secure remote MCP agent
 
 Commands:
-  init            Create config, TLS certificate, API key, operator key, and default denylist
-                  (shows the operator key once; only its hash is stored)
+  init            Create config, TLS certificate, API key, and default denylist
   serve           Start HTTPS MCP server
     -dev          Plain HTTP, no TLS (local development only)
     -tunnel       Start a Cloudflare quick tunnel and print the public mcp.json snippet
@@ -90,8 +89,7 @@ Commands:
     -cursor       Print only the Cursor setup; with -claude, print both
     -no-browser   Do not open the dashboard in a browser
   status          Show configuration paths and certificate fingerprint
-  keygen          Rotate the API key (the agent's key)
-    -operator     Rotate the operator key (the dashboard's key) instead; shows it once
+  keygen          Rotate the API key
   update          Pull the latest source and rebuild what is stale (binary, dashboard)
     -check        Only report what would change
     -force        Discard local changes and local commits (default: stop on conflicts)
@@ -109,8 +107,7 @@ func cmdInit() error {
 	if err != nil {
 		return err
 	}
-	operatorKey, err := ensureKeys(cfg)
-	if err != nil {
+	if err := ensureAPIKey(cfg); err != nil {
 		return err
 	}
 	if _, err := os.Stat(cfg.CertFile); os.IsNotExist(err) {
@@ -127,14 +124,7 @@ func cmdInit() error {
 		return err
 	}
 	fmt.Println("Initialized Axon configuration.")
-	fmt.Printf("API key (the AI agent):       %s\n", cfg.APIKey)
-	if operatorKey != "" {
-		fmt.Printf("Operator key (the dashboard): %s\n", operatorKey)
-		fmt.Println("Save the operator key now. Axon stores only a hash and cannot show it again.")
-		fmt.Println("The agent must not get it. Run `axon keygen -operator` for a new one.")
-	} else {
-		fmt.Println("Operator key (the dashboard): already set. It was shown once when it was created.")
-	}
+	fmt.Printf("API key (the AI agent and the dashboard): %s\n", cfg.APIKey)
 	fp, err := security.CertFingerprint(cfg.CertFile)
 	if err == nil {
 		fmt.Printf("TLS fingerprint: %s\n", fp)
@@ -236,7 +226,7 @@ func cmdServe() error {
 		}
 
 		if !*noBrowser {
-			// No key in the address: it would show in the process list. Paste the operator key.
+			// No key in the address: it would show in the process list. Paste the API key.
 			go openBrowser(dashboardURL)
 		}
 
@@ -333,11 +323,6 @@ func cmdStatus() error {
 	} else {
 		fmt.Printf("api key set:    no — run axon init\n")
 	}
-	if cfg.OperatorKeyHash != "" {
-		fmt.Printf("operator key:   set (only a hash is stored)\n")
-	} else {
-		fmt.Printf("operator key:   no — run axon init\n")
-	}
 	return nil
 }
 
@@ -346,7 +331,6 @@ func cmdKeygen() error {
 		return err
 	}
 	fs := flag.NewFlagSet("keygen", flag.ContinueOnError)
-	operator := fs.Bool("operator", false, "rotate the operator key (the dashboard's key) instead of the API key")
 	if err := fs.Parse(os.Args[2:]); err != nil {
 		return err
 	}
@@ -354,19 +338,7 @@ func cmdKeygen() error {
 	if err != nil {
 		return err
 	}
-	if *operator {
-		k, err := newOperatorKey(cfg)
-		if err != nil {
-			return err
-		}
-		if err := cfg.Save(); err != nil {
-			return err
-		}
-		fmt.Printf("New operator key: %s\n", k)
-		fmt.Println("Save it now. Axon stores only a hash and cannot show it again. Restart axon serve to use it.")
-		return nil
-	}
-	k, err := genKey(apiKeyPrefix)
+	k, err := genKey()
 	if err != nil {
 		return err
 	}
@@ -375,6 +347,7 @@ func cmdKeygen() error {
 		return err
 	}
 	fmt.Printf("New API key: %s\n", k)
+	fmt.Println("Restart axon serve to use it.")
 	return nil
 }
 
@@ -414,40 +387,26 @@ func cmdUpdate() error {
 	})
 }
 
-const (
-	apiKeyPrefix      = "axon_k_" // the AI agent's key
-	operatorKeyPrefix = "axon_o_" // the dashboard's key
-)
+// apiKeyPrefix starts the one key: the AI agent's and the dashboard's.
+const apiKeyPrefix = "axon_k_"
 
-// ensureKeys creates the API key and the operator key if they are missing. It
-// returns the operator key only when it creates one: the config keeps a hash,
-// so this is the one time that the key exists in clear text.
-func ensureKeys(cfg *config.Config) (operatorKey string, err error) {
-	if cfg.APIKey == "" {
-		if cfg.APIKey, err = genKey(apiKeyPrefix); err != nil {
-			return "", err
-		}
+// ensureAPIKey creates the API key if it is missing.
+func ensureAPIKey(cfg *config.Config) error {
+	if cfg.APIKey != "" {
+		return nil
 	}
-	if cfg.OperatorKeyHash == "" {
-		return newOperatorKey(cfg)
-	}
-	return "", nil
-}
-
-// newOperatorKey replaces the operator key. The config keeps only its hash.
-func newOperatorKey(cfg *config.Config) (string, error) {
-	k, err := genKey(operatorKeyPrefix)
+	k, err := genKey()
 	if err != nil {
-		return "", err
+		return err
 	}
-	cfg.OperatorKeyHash = config.HashKey(k)
-	return k, nil
+	cfg.APIKey = k
+	return nil
 }
 
-func genKey(prefix string) (string, error) {
+func genKey() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
 		return "", err
 	}
-	return prefix + hex.EncodeToString(b), nil
+	return apiKeyPrefix + hex.EncodeToString(b), nil
 }

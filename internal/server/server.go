@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io"
 	"io/fs"
 	"net"
 	"net/http"
@@ -35,7 +34,6 @@ type Options struct {
 // Run starts the HTTPS server until context is cancelled.
 func Run(ctx context.Context, cfg *config.Config, deny *security.Denylist, log *audit.Logger, opts Options) error {
 	pm := tools.NewProcManager()
-	log.SetRedactor(pm.Redact)
 	mcpSrv := &mcp.Server{
 		Cfg:     cfg,
 		Deny:    deny,
@@ -75,106 +73,26 @@ func Run(ctx context.Context, cfg *config.Config, deny *security.Denylist, log *
 		}
 	}
 
-	// requireKey accepts only a token that validKey approves. The agent's API key
-	// opens /mcp. The operator key opens the dashboard routes. The agent must not
-	// hold the operator key: it registers secrets and answers prompts.
-	requireKey := func(validKey func(token string) bool, next http.HandlerFunc) http.HandlerFunc {
-		return func(w http.ResponseWriter, r *http.Request) {
-			token := security.BearerToken(r)
-			if token == "" || !validKey(token) {
-				http.Error(w, "unauthorized", http.StatusUnauthorized)
-				return
-			}
-			next(w, r)
-		}
-	}
-
+	// There is one key. It opens /mcp as a Bearer token and /ws as a subprotocol.
 	apiKeyOK := func(token string) bool { return security.ConstantTimeEqual(token, cfg.APIKey) }
 
-	mux.HandleFunc("POST /mcp", secure(requireKey(apiKeyOK, func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("POST /mcp", secure(func(w http.ResponseWriter, r *http.Request) {
+		token := security.BearerToken(r)
+		if token == "" || !apiKeyOK(token) {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
 		mcpSrv.HandleJSONRPC(r.Context(), w, r, r.RemoteAddr)
-	})))
+	}))
 
-	mux.HandleFunc("POST /api/cancel", secure(requireKey(cfg.OperatorKeyMatches, func(w http.ResponseWriter, r *http.Request) {
-		remoteIP := r.RemoteAddr
-		var body struct {
-			ProcessID string `json:"process_id"`
-		}
-		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
-			return
-		}
-		mcpSrv.Audit.Log(audit.Entry{RemoteIP: remoteIP, Action: "cancel_command", Detail: body.ProcessID + " (dashboard)"})
-		b, err := tools.CancelCommand(body.ProcessID, pm)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if opts.Events != nil {
-			opts.Events.Publish(events.Event{
-				Type: "dashboard_cancel",
-				Data: map[string]any{
-					"process_id": body.ProcessID,
-					"remote_ip":  remoteIP,
-				},
-			})
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(b)
-	})))
-
-	mux.HandleFunc("POST /api/input", secure(requireKey(cfg.OperatorKeyMatches, func(w http.ResponseWriter, r *http.Request) {
-		remoteIP := r.RemoteAddr
-		var body struct {
-			ProcessID string `json:"process_id"`
-			Data      string `json:"data"`
-			// Secret defaults to true: operator input is hidden from the agent
-			// unless the dashboard says it is a plain response.
-			Secret *bool `json:"secret"`
-		}
-		if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&body); err != nil {
-			http.Error(w, "invalid json", http.StatusBadRequest)
-			return
-		}
-		if body.ProcessID == "" {
-			http.Error(w, "process_id is required", http.StatusBadRequest)
-			return
-		}
-		secret := body.Secret == nil || *body.Secret
-		mcpSrv.Audit.Log(audit.Entry{RemoteIP: remoteIP, Action: "send_input", Detail: body.ProcessID + " (dashboard)"})
-		b, err := tools.SendOperatorInput(body.ProcessID, body.Data, secret, pm)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		if opts.Events != nil {
-			opts.Events.Publish(events.Event{
-				Type: "dashboard_input",
-				Data: map[string]any{
-					"process_id": body.ProcessID,
-					"remote_ip":  remoteIP,
-					"secret":     secret,
-				},
-			})
-		}
-		w.Header().Set("Content-Type", "application/json")
-		_, _ = w.Write(b)
-	})))
-
-	// The dashboard shows the agent's setup snippet, so the operator may read the
-	// API key. The agent cannot call this route.
-	mux.HandleFunc("GET /api/agent-config", secure(requireKey(cfg.OperatorKeyMatches, func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(map[string]string{"api_key": cfg.APIKey})
-	})))
-
+	// The dashboard is read-only. It sends the key in the Sec-WebSocket-Protocol
+	// header: see hub.ServeWS.
 	mux.HandleFunc("GET /ws", secure(func(w http.ResponseWriter, r *http.Request) {
 		if opts.Hub == nil {
 			http.Error(w, "dashboard unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		opts.Hub.ServeWS(w, r, cfg.OperatorKeyMatches)
+		opts.Hub.ServeWS(w, r, apiKeyOK)
 	}))
 
 	mux.Handle("GET /", staticServer)

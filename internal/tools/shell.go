@@ -37,8 +37,7 @@ func RunShell(ctx context.Context, cfg *config.Config, deny *security.Denylist, 
 	if stall <= 0 {
 		stall = 5 * time.Second
 	}
-	res, err := runShellPlatform(ctx, command, timeout, stall, pm)
-	return pm.redactResult(res), err
+	return runShellPlatform(ctx, command, timeout, stall, pm)
 }
 
 // ShellResultJSON returns JSON bytes for MCP content.

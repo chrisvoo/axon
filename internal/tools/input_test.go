@@ -7,8 +7,8 @@ import (
 	"testing"
 )
 
-// After the operator answers in the dashboard, the command may already be
-// gone. The agent must still get its final output.
+// A command may end before the agent calls send_input. The agent must still
+// get its final output.
 func TestSendInput_ReturnsFinishedResult(t *testing.T) {
 	pm := NewProcManager()
 	code := 0
@@ -42,87 +42,21 @@ func decodeResult(t *testing.T, b []byte) map[string]any {
 	return m
 }
 
-func TestSendOperatorInput_SecretIsRegisteredBeforeTheWrite(t *testing.T) {
+func TestSendInput_WritesTheDataAndReturnsTheOutput(t *testing.T) {
 	pm := NewProcManager()
-	var seenAtWrite string
-	tp := &TrackedProc{ID: "p1", OutBuf: &bytes.Buffer{}}
-	tp.SendInput = func([]byte) error {
-		seenAtWrite = pm.Redact("hunter2")
-		return nil
-	}
-	pm.Put(tp)
-
-	if _, err := SendOperatorInput("p1", "hunter2\n", true, pm); err != nil {
-		t.Fatal(err)
-	}
-	if seenAtWrite != "[redacted]" {
-		t.Fatalf("the secret must be registered before it is written, got %q", seenAtWrite)
-	}
-}
-
-func TestSendOperatorInput_NonSecretIsNotRedacted(t *testing.T) {
-	pm := NewProcManager()
+	var written []byte
 	tp := &TrackedProc{ID: "p1", OutBuf: bytes.NewBufferString("Continue? yes\r\n")}
-	tp.SendInput = func([]byte) error { return nil }
+	tp.SendInput = func(b []byte) error { written = b; return nil }
 	pm.Put(tp)
 
-	b, err := SendOperatorInput("p1", "yes\n", false, pm)
+	b, err := SendInput("p1", "yes\n", pm)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if string(written) != "yes\n" {
+		t.Fatalf("the process must get the data, got %q", written)
 	}
 	if out := decodeResult(t, b)["stdout"]; out != "Continue? yes\r\n" {
-		t.Fatalf("a plain response must stay visible, got %q", out)
-	}
-}
-
-func TestSendInput_RedactsSecretsInSnapshot(t *testing.T) {
-	pm := NewProcManager()
-	tp := &TrackedProc{ID: "p1", OutBuf: bytes.NewBufferString("Password: hunter2\r\n")}
-	tp.SendInput = func([]byte) error { return nil }
-	pm.Put(tp)
-
-	// The operator's secret, then the agent's own call.
-	if _, err := SendOperatorInput("p1", "hunter2\n", true, pm); err != nil {
-		t.Fatal(err)
-	}
-	b, err := SendInput("p1", "", pm)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if out := decodeResult(t, b)["stdout"]; out != "Password: [redacted]\r\n" {
 		t.Fatalf("unexpected stdout: %q", out)
-	}
-}
-
-// Anyone who can call the dashboard route could otherwise register any word and
-// hide it from the audit log and the operator's events.
-func TestSendOperatorInput_UnknownProcessRegistersNothing(t *testing.T) {
-	pm := NewProcManager()
-	if _, err := SendOperatorInput("nope", "curl\n", true, pm); err == nil {
-		t.Fatal("expected an error for an unknown process")
-	}
-	if got := pm.Redact("curl"); got != "curl" {
-		t.Fatalf("an unknown process must not register a secret, got %q", got)
-	}
-}
-
-func TestSendOperatorInput_FinishedProcessRegistersNothing(t *testing.T) {
-	pm := NewProcManager()
-	pm.Finish("p1", ShellResult{Status: "completed", Stdout: "done"})
-	if _, err := SendOperatorInput("p1", "curl\n", true, pm); err != nil {
-		t.Fatal(err)
-	}
-	if got := pm.Redact("curl"); got != "curl" {
-		t.Fatalf("a finished process must not register a secret, got %q", got)
-	}
-}
-
-func TestSendOperatorInput_EmptyProcessIDRegistersNothing(t *testing.T) {
-	pm := NewProcManager()
-	if _, err := SendOperatorInput("", "curl\n", true, pm); err == nil {
-		t.Fatal("expected an error for an empty process id")
-	}
-	if got := pm.Redact("curl"); got != "curl" {
-		t.Fatalf("an empty process id must not register a secret, got %q", got)
 	}
 }

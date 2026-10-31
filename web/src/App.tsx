@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { useAgentKey } from './hooks/useAgentKey'
 import { useAxonSocket } from './hooks/useAxonSocket'
 import type { ActivityRow, ActivityStatus, AxonEvent } from './types'
 import { API_KEY_STORAGE } from './types'
@@ -104,12 +103,12 @@ export function reduceActivity(rows: Map<string, ActivityRow>, event: AxonEvent)
 }
 
 export default function App() {
-  // The operator key opens the dashboard routes. It is not the agent's API key.
+  // The dashboard uses the same API key as the agent. It only watches.
   const [apiKey, setApiKey] = useState<string | null>(() => {
     if (DEMO_MODE) return 'demo'
     const stored = sessionStorage.getItem(API_KEY_STORAGE)
     if (stored) return stored
-    // Auto-connect when the dashboard URL contains #<api-key> (set by the server on startup)
+    // Auto-connect when the dashboard URL contains #<api-key>
     const hash = window.location.hash.slice(1)
     if (hash) {
       sessionStorage.setItem(API_KEY_STORAGE, hash)
@@ -167,17 +166,18 @@ export default function App() {
     setWsConnected(connected)
   }, [])
 
-  // In demo mode the WebSocket key is the sentinel 'demo', which will fail to
-  // authenticate. That's fine — we never want a real connection in demo mode.
-  useAxonSocket(DEMO_MODE ? null : apiKey, { onEvent, onConnectionChange: onConnectionChange })
-
   const handleDisconnect = useCallback(() => {
     sessionStorage.removeItem(API_KEY_STORAGE)
     setApiKey(null)
   }, [])
 
-  const loadedAgentKey = useAgentKey(DEMO_MODE ? null : apiKey, handleDisconnect)
-  const agentKey = DEMO_MODE ? 'axon_k_demo' : loadedAgentKey
+  // In demo mode there is no real connection: the hook gets no key. A wrong key
+  // makes the server close with 4401, and the connect screen asks for a new one.
+  useAxonSocket(DEMO_MODE ? null : apiKey, {
+    onEvent,
+    onConnectionChange,
+    onUnauthorized: handleDisconnect,
+  })
 
   // Newest first: newer items appear at top of the list
   const sortedItems = useMemo(() => {
@@ -220,7 +220,7 @@ export default function App() {
           since={connectedAt}
         />
         <SystemStatus stats={systemStats} />
-        <MCPConfigPanel apiKey={agentKey ?? 'YOUR_API_KEY'} />
+        <MCPConfigPanel apiKey={DEMO_MODE ? 'axon_k_demo' : apiKey} />
         {DEMO_MODE ? (
           <DemoPanel onInject={onEvent} />
         ) : (
@@ -229,15 +229,13 @@ export default function App() {
             onClick={handleDisconnect}
             className="rounded-md border border-zinc-700 px-3 py-2 text-xs font-medium text-zinc-300 hover:bg-zinc-800"
           >
-            Change operator key
+            Change API key
           </button>
         )}
       </aside>
       <main className="flex min-h-0 min-w-0 flex-1 flex-col p-4">
         <ActivityLog
           items={sortedItems}
-          apiKey={apiKey}
-          mockApi={DEMO_MODE}
           onClear={() => {
             setRows(new Map())
             setRequestCount(0)

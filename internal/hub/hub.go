@@ -4,12 +4,28 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/chrisvoo/axon/internal/events"
 	"github.com/chrisvoo/axon/internal/tools"
 	"github.com/gorilla/websocket"
+)
+
+const (
+	// Subprotocol is the one that the server selects. A client offers it next to
+	// its key protocol.
+	Subprotocol = "axon.v1"
+	// KeyProtocolPrefix starts the offered protocol that carries the API key:
+	// "axon.key.<key>". The key goes in the Sec-WebSocket-Protocol request header,
+	// so it never shows in a URL, a proxy access log or the browser history. The
+	// server never echoes it back.
+	KeyProtocolPrefix = "axon.key."
+	// CloseUnauthorized is the close code (private use range) for a missing or
+	// wrong key. A browser cannot read the HTTP status of a failed handshake, so
+	// the server completes it and then closes with this code.
+	CloseUnauthorized = 4401
 )
 
 // Hub fans out bus events to WebSocket clients and pushes periodic system stats.
@@ -30,6 +46,7 @@ func NewHub(bus *events.Bus, version string) *Hub {
 		upgrader: websocket.Upgrader{
 			ReadBufferSize:  1024,
 			WriteBufferSize: 4096,
+			Subprotocols:    []string{Subprotocol},
 			CheckOrigin: func(r *http.Request) bool {
 				return true
 			},
@@ -103,16 +120,33 @@ func (h *Hub) broadcastEvent(e events.Event) {
 	}
 }
 
-// ServeWS upgrades the connection and streams events to the browser.
-// Clients must pass ?key=<operator key>. validKey decides whether the key is right.
-func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, validKey func(key string) bool) {
-	key := r.URL.Query().Get("key")
-	if key == "" || !validKey(key) {
-		http.Error(w, "unauthorized", http.StatusUnauthorized)
-		return
+// keyFromProtocols returns the key from the offered "axon.key.<key>" protocol.
+func keyFromProtocols(protocols []string) string {
+	for _, p := range protocols {
+		if key, ok := strings.CutPrefix(p, KeyProtocolPrefix); ok {
+			return key
+		}
 	}
+	return ""
+}
+
+// ServeWS upgrades the connection and streams events to the browser. The client
+// offers the protocols "axon.v1" and "axon.key.<API key>". validKey decides
+// whether the key is right. A missing or wrong key closes the connection with
+// CloseUnauthorized before the server sends any event.
+func (h *Hub) ServeWS(w http.ResponseWriter, r *http.Request, validKey func(key string) bool) {
+	key := keyFromProtocols(websocket.Subprotocols(r))
 	conn, err := h.upgrader.Upgrade(w, r, nil)
 	if err != nil {
+		return
+	}
+	if key == "" || !validKey(key) {
+		_ = conn.WriteControl(
+			websocket.CloseMessage,
+			websocket.FormatCloseMessage(CloseUnauthorized, "unauthorized"),
+			time.Now().Add(time.Second),
+		)
+		_ = conn.Close()
 		return
 	}
 	h.register(conn)

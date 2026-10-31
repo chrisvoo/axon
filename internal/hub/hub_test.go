@@ -1,44 +1,114 @@
 package hub
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/chrisvoo/axon/internal/events"
+	"github.com/gorilla/websocket"
 )
 
-func TestServeWS_RejectsAKeyThatFailsTheCheck(t *testing.T) {
+// serve starts a hub behind a test server. The key check accepts only "right".
+func serve(t *testing.T) (*httptest.Server, *[]string) {
+	t.Helper()
 	h := NewHub(events.NewBus(), "test")
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/ws?key=wrong", nil)
+	var checked []string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.ServeWS(w, r, func(key string) bool {
+			checked = append(checked, key)
+			return key == "right"
+		})
+	}))
+	t.Cleanup(srv.Close)
+	return srv, &checked
+}
 
-	h.ServeWS(rec, req, func(key string) bool { return key == "right" })
+func dial(t *testing.T, srv *httptest.Server, path string, protocols ...string) (*websocket.Conn, *http.Response) {
+	t.Helper()
+	d := websocket.Dialer{Subprotocols: protocols, HandshakeTimeout: 2 * time.Second}
+	conn, resp, err := d.Dial("ws"+strings.TrimPrefix(srv.URL, "http")+path, nil)
+	if err != nil {
+		t.Fatalf("handshake failed: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+	return conn, resp
+}
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("got HTTP %d, want 401", rec.Code)
+func expectUnauthorized(t *testing.T, conn *websocket.Conn) {
+	t.Helper()
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, msg, err := conn.ReadMessage()
+	if !websocket.IsCloseError(err, CloseUnauthorized) {
+		t.Fatalf("expected close code %d, got message %q and error %v", CloseUnauthorized, msg, err)
 	}
 }
 
-func TestServeWS_RejectsAMissingKey(t *testing.T) {
-	h := NewHub(events.NewBus(), "test")
-	rec := httptest.NewRecorder()
+func TestServeWS_AcceptsTheKeyInTheSubprotocol(t *testing.T) {
+	srv, checked := serve(t)
 
-	h.ServeWS(rec, httptest.NewRequest("GET", "/ws", nil), func(string) bool { return true })
+	conn, resp := dial(t, srv, "/ws", Subprotocol, KeyProtocolPrefix+"right")
 
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("got HTTP %d, want 401", rec.Code)
+	_ = conn.SetReadDeadline(time.Now().Add(2 * time.Second))
+	_, msg, err := conn.ReadMessage()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ev events.Event
+	if err := json.Unmarshal(msg, &ev); err != nil || ev.Type != "connected" {
+		t.Fatalf("expected the connected event, got %q (%v)", msg, err)
+	}
+	if got := conn.Subprotocol(); got != Subprotocol {
+		t.Fatalf("the server must select %q, got %q", Subprotocol, got)
+	}
+	if len(*checked) != 1 || (*checked)[0] != "right" {
+		t.Fatalf("the key check must get the key without its prefix, got %v", *checked)
+	}
+	if strings.Contains(strings.Join(resp.Header.Values("Sec-WebSocket-Protocol"), ","), "right") {
+		t.Fatal("the server must not echo the key")
 	}
 }
 
-func TestServeWS_AcceptsAKeyThatPassesTheCheck(t *testing.T) {
-	h := NewHub(events.NewBus(), "test")
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/ws?key=right", nil)
+func TestServeWS_ClosesAWrongKey(t *testing.T) {
+	srv, _ := serve(t)
+	conn, _ := dial(t, srv, "/ws", Subprotocol, KeyProtocolPrefix+"wrong")
+	expectUnauthorized(t, conn)
+}
 
-	h.ServeWS(rec, req, func(key string) bool { return key == "right" })
+func TestServeWS_ClosesAMissingKey(t *testing.T) {
+	srv, _ := serve(t)
+	conn, _ := dial(t, srv, "/ws", Subprotocol)
+	expectUnauthorized(t, conn)
+}
 
-	if rec.Code == http.StatusUnauthorized {
-		t.Fatal("a key that passes the check must not get 401")
+// The key used to travel in the URL. The URL shows in proxy logs, so it must not work.
+func TestServeWS_IgnoresAKeyInTheURL(t *testing.T) {
+	srv, checked := serve(t)
+	conn, _ := dial(t, srv, "/ws?key=right", Subprotocol)
+	expectUnauthorized(t, conn)
+	if len(*checked) != 0 {
+		t.Fatalf("the key check must not run without a key protocol, got %v", *checked)
+	}
+}
+
+func TestKeyFromProtocols(t *testing.T) {
+	cases := []struct {
+		name      string
+		protocols []string
+		want      string
+	}{
+		{"both protocols", []string{"axon.v1", "axon.key.abc"}, "abc"},
+		{"key first", []string{"axon.key.abc", "axon.v1"}, "abc"},
+		{"no key", []string{"axon.v1"}, ""},
+		{"none", nil, ""},
+		{"empty key", []string{"axon.key."}, ""},
+	}
+	for _, tc := range cases {
+		if got := keyFromProtocols(tc.protocols); got != tc.want {
+			t.Errorf("%s: got %q, want %q", tc.name, got, tc.want)
+		}
 	}
 }

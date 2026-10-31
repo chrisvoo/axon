@@ -25,6 +25,21 @@ func TestIsPrivilegedCmd(t *testing.T) {
 		{"visudo -c", false},
 		{"cat /etc/sudoers", false},
 		{"ls", false},
+		// Text the shell does not run is not an invocation.
+		{`echo "needs sudo"`, false},
+		{`echo 'run sudo id'`, false},
+		{"ls # sudo later", false},
+		{"grep -rn 'sudo' /etc/ssh", false},
+		{`echo "it's sudo time"`, false},
+		{"echo $#; sudo id", true},
+		// Text the shell runs stays visible.
+		{`bash -c "sudo id"`, true},
+		{`sh -lc 'sudo id'`, true},
+		{`eval "sudo id"`, true},
+		{`echo "$(sudo id)"`, true},
+		{"echo \"`sudo id`\"", true},
+		{`echo "x" && sudo id`, true},
+		{`echo "unterminated sudo`, true},
 	}
 	for _, tc := range cases {
 		if got := isPrivilegedCmd(tc.cmd); got != tc.want {

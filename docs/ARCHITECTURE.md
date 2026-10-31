@@ -103,7 +103,7 @@ Every call starts the same way. The agent sends `tools/call` and Axon publishes 
 
 **A. Normal command.** Axon runs the command in a pty and waits for it to finish. It returns `completed` with the output and the exit code. It then publishes `tool_result`.
 
-**B. Command contains `sudo`.** Axon does not run the command. It publishes `privileged_commands`, and the dashboard shows a copy-paste dialog. The agent gets `{"status":"requires_user_action"}`. This check is a guardrail, not a security boundary. A path such as `/usr/bin/sudo` is caught, but a script that calls `sudo` is not.
+**B. Command contains `sudo`.** Axon does not run the command. It publishes `privileged_commands`, and the dashboard shows a copy-paste dialog. The agent gets `{"status":"requires_user_action"}`. This check is a guardrail, not a security boundary. A path such as `/usr/bin/sudo` is caught, but a script that calls `sudo` is not. The word in a comment or in quoted text that the shell does not run (`echo "needs sudo"`) is ignored. Quoted text after `-c` or `eval`, or with `$(` or a backtick, is still checked.
 
 **C. Command waits for input.** If the command prints nothing for `input_stall_seconds` (default 5), Axon returns `input_required` with a `process_id`. The command keeps running. Its lifetime does not depend on the HTTP request. It ends when one of these happens:
 

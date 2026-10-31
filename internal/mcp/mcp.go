@@ -371,14 +371,87 @@ func toInt(v any) (int, bool) {
 }
 
 // isPrivilegedCmd returns true if cmd contains a sudo invocation, including a
-// path-qualified one such as /usr/bin/sudo.
+// path-qualified one such as /usr/bin/sudo. The word "sudo" in a comment or in a
+// quoted string that the shell does not run (echo "needs sudo") is not an invocation.
 func isPrivilegedCmd(cmd string) bool {
+	return hasSudoWord(maskInertText(cmd))
+}
+
+// maskInertText replaces with spaces the text that the shell never runs: comments,
+// single-quoted strings and double-quoted strings without command substitution.
+// A quoted string stays visible after -c or eval, and when it holds $( or a backtick,
+// because the shell runs that text. A heredoc body also stays visible.
+func maskInertText(cmd string) string {
+	b := []byte(cmd)
+	for i := 0; i < len(b); i++ {
+		switch c := b[i]; {
+		case c == '\\':
+			i++ // the next byte is literal
+		case c == '#' && (i == 0 || isShellBoundary(b[i-1])):
+			j := i
+			for j < len(b) && b[j] != '\n' {
+				b[j] = ' '
+				j++
+			}
+			i = j - 1
+		case c == '\'' || c == '"':
+			end, substitutes := closingQuote(b, i)
+			if end < 0 {
+				return string(b) // unterminated: keep the rest visible
+			}
+			if !substitutes && !runsItsArgument(b, i) {
+				for j := i + 1; j < end; j++ {
+					b[j] = ' '
+				}
+			}
+			i = end
+		}
+	}
+	return string(b)
+}
+
+// closingQuote returns the index of the quote that closes the one at b[open], or -1.
+// substitutes is true when a double-quoted string holds $( or a backtick.
+func closingQuote(b []byte, open int) (end int, substitutes bool) {
+	q := b[open]
+	for j := open + 1; j < len(b); j++ {
+		switch {
+		case b[j] == q:
+			return j, substitutes
+		case q == '"' && b[j] == '\\':
+			j++
+		case q == '"' && (b[j] == '`' || (b[j] == '$' && j+1 < len(b) && b[j+1] == '(')):
+			substitutes = true
+		}
+	}
+	return -1, false
+}
+
+// runsItsArgument reports whether the word before b[quote] makes the shell run the
+// quoted text: eval, or a -c flag such as bash -c or sh -lc.
+func runsItsArgument(b []byte, quote int) bool {
+	end := quote
+	for end > 0 && (b[end-1] == ' ' || b[end-1] == '\t') {
+		end--
+	}
+	start := end
+	for start > 0 && !isShellBoundary(b[start-1]) {
+		start--
+	}
+	w := string(b[start:end])
+	return w == "eval" || (strings.HasPrefix(w, "-") && !strings.HasPrefix(w, "--") && strings.HasSuffix(w, "c"))
+}
+
+// hasSudoWord reports whether cmd holds sudo as a word. A quote, a backtick and a
+// closing parenthesis end a word too, so that bash -c "sudo id" and $(sudo) count.
+func hasSudoWord(cmd string) bool {
+	edge := func(b byte) bool { return isShellBoundary(b) || b == '"' || b == '\'' || b == '`' }
 	for i := 0; i <= len(cmd)-4; i++ {
 		if cmd[i:i+4] != "sudo" {
 			continue
 		}
-		before := i == 0 || isShellBoundary(cmd[i-1]) || cmd[i-1] == '/'
-		after := i+4 >= len(cmd) || cmd[i+4] == ' ' || cmd[i+4] == '\t' || isShellBoundary(cmd[i+4])
+		before := i == 0 || edge(cmd[i-1]) || cmd[i-1] == '/'
+		after := i+4 >= len(cmd) || edge(cmd[i+4]) || cmd[i+4] == ')'
 		if before && after {
 			return true
 		}

@@ -2,6 +2,9 @@
 
 BINARY=axon
 
+# A bare `make` builds the binary too, not only the dashboard.
+.DEFAULT_GOAL := build
+
 web:
 	cd web && pnpm install --frozen-lockfile && pnpm build
 	rm -rf internal/dashboard/dist

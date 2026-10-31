@@ -413,7 +413,13 @@ func blankInertText(cmd string) string {
 			if end < 0 {
 				return string(b) // unterminated: keep the rest visible
 			}
-			if !substitutes && !atCommandPosition(b, i) {
+			if substitutes {
+				// A $( ) can hold quotes of its own, and closingQuote does not nest them:
+				// echo "$(echo "x"; sudo id)" would end the string early and blank the
+				// sudo. Stop masking here, so that everything after it stays visible.
+				return string(b)
+			}
+			if !atCommandPosition(b, i) {
 				for j := i + 1; j < end; j++ {
 					b[j] = ' '
 				}
@@ -444,21 +450,30 @@ func closingQuote(b []byte, open int) (end int, substitutes bool) {
 }
 
 // atCommandPosition reports whether the quote at b[quote] starts a command word, as in
-// "sudo" id or echo hi; 'sudo' id.
+// "sudo" id, $'sudo' id or echo hi; 'sudo' id.
 func atCommandPosition(b []byte, quote int) bool {
 	j := quote
+	if j > 0 && b[j-1] == '$' {
+		j-- // $'...' and $"..." quote the word the same way
+	}
 	for j > 0 && (b[j-1] == ' ' || b[j-1] == '\t') {
 		j--
 	}
 	return j == 0 || strings.IndexByte(";&|(\n`{", b[j-1]) >= 0
 }
 
-// runnerWords hand text to a shell or to another command, so quoted text near them can
-// run: bash -c "sudo id", echo "sudo id" | sh, ssh host "sudo id", xargs, env "sudo" id.
+// runnerWords hand text to a shell, an interpreter or another command, so quoted text near
+// them can run: bash -c "sudo id", echo "sudo id" | sh, ssh host "sudo id", xargs,
+// env "sudo" id, watch 'ls; sudo id', perl -e 'system("sudo id")'. Any python* counts too.
 var runnerWords = map[string]bool{
 	"sh": true, "bash": true, "zsh": true, "dash": true, "ksh": true, "busybox": true,
 	"eval": true, "source": true, "exec": true, "env": true, "command": true,
-	"nohup": true, "time": true, "xargs": true, "ssh": true,
+	"nohup": true, "time": true, "xargs": true, "ssh": true, "su": true, "watch": true,
+	"perl": true, "ruby": true, "node": true, "php": true, "lua": true, "awk": true, "gawk": true,
+}
+
+func isRunnerWord(base string) bool {
+	return runnerWords[base] || strings.HasPrefix(base, "python")
 }
 
 // hasRunnerWord reports whether any word of cmd is a runner word. A path counts only
@@ -468,7 +483,7 @@ func hasRunnerWord(cmd string) bool {
 		return r < 128 && (isShellBoundary(byte(r)) || strings.ContainsRune(`"'`+"`)", r))
 	})
 	for _, w := range words {
-		if dir, base := path.Split(w); runnerWords[base] && (dir == "" || strings.HasSuffix(dir, "bin/")) {
+		if dir, base := path.Split(w); isRunnerWord(base) && (dir == "" || strings.HasSuffix(dir, "bin/")) {
 			return true
 		}
 	}

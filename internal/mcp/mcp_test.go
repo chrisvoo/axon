@@ -48,10 +48,48 @@ func TestIsPrivilegedCmd(t *testing.T) {
 		{`echo "sudo id" | sh`, true}, // quoted text piped into a shell
 		{`ssh host "sudo id"`, true},  // runs on the remote side
 		{`xargs -I{} sh -c 'sudo {}'`, true},
+		// Quotes nested inside $( ) or a backtick must not hide the sudo.
+		{`echo "$(echo "x"; sudo id)"`, true},
+		{`echo "$(cat "f" && sudo id)"`, true},
+		{"echo \"`echo \"x\"; sudo id`\"", true},
+		{`echo "$(date)" "$(echo "x"; sudo id)"`, true},
+		{`echo "$(date)" 'needs sudo'`, true}, // stops masking after the first $( ): safe side
+		// Interpreters and watchers run their quoted argument.
+		{`python3 -c "import os; os.system('sudo id')"`, true},
+		{`python3.12 -c "import os; os.system('sudo id')"`, true},
+		{`perl -e 'system("sudo id")'`, true},
+		{`awk 'BEGIN{system("sudo id")}'`, true},
+		{`watch 'ls; sudo id'`, true},
+		{`su -c 'sudo id'`, true},
+		{`bash <<< "sudo id"`, true},
+		{`$'sudo' id`, true},
+		// Quoted text that nothing runs stays quiet.
+		{`grep -c "sudo" /etc/group`, false},
+		{`grep -rn "sudo" /etc/ssh`, false},
+		{`echo "sudo" "and" 'sudo'`, false},
+		{`cat /etc/pythonrc 'needs sudo'`, false},
 	}
 	for _, tc := range cases {
 		if got := isPrivilegedCmd(tc.cmd); got != tc.want {
 			t.Errorf("isPrivilegedCmd(%q) = %v, want %v", tc.cmd, got, tc.want)
+		}
+	}
+}
+
+// These commands run sudo, and isPrivilegedCmd does not see it. They are the documented
+// limits (docs/SECURITY.md, H4): the check is a guardrail, not a security boundary.
+// A case that starts to return true is good news: move it to TestIsPrivilegedCmd and
+// update H4.
+func TestIsPrivilegedCmd_KnownLimits(t *testing.T) {
+	t.Parallel()
+	for _, cmd := range []string{
+		`s"u"do id`,                          // quotes split the word
+		`x=sudo; $x id`,                      // the word comes from a variable
+		`echo c3VkbyBpZA== | base64 -d | sh`, // the word is encoded
+		`./script.sh`,                        // a script that calls sudo
+	} {
+		if isPrivilegedCmd(cmd) {
+			t.Errorf("isPrivilegedCmd(%q) = true: it was a known limit, so move it to TestIsPrivilegedCmd and update H4", cmd)
 		}
 	}
 }

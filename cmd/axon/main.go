@@ -25,7 +25,7 @@ import (
 	"github.com/chrisvoo/axon/internal/update"
 )
 
-const version = "2.0.1" // semantic version: see "Versioning" in CLAUDE.md
+const version = "3.0.0" // semantic version: see "Versioning" in CLAUDE.md
 
 // Specific styles for main.go (reuses cyanStyle, dimStyle, boldStyle from startup.go)
 var (
@@ -53,11 +53,6 @@ func main() {
 			fmt.Fprintln(os.Stderr, err)
 			os.Exit(1)
 		}
-	case "keygen":
-		if err := cmdKeygen(); err != nil {
-			fmt.Fprintln(os.Stderr, err)
-			os.Exit(1)
-		}
 	case "update":
 		if err := cmdUpdate(); err != nil {
 			fmt.Fprintln(os.Stderr, err)
@@ -75,8 +70,8 @@ func usage() {
 	fmt.Fprintf(os.Stderr, `axon %s — secure remote MCP agent
 
 Commands:
-  init            Create config, TLS certificate, API key, and default denylist
-  serve           Start HTTPS MCP server
+  init            Create config, TLS certificate, and default denylist
+  serve           Start HTTPS MCP server (makes a new API key at every start; the key is never saved)
     -dev          Plain HTTP, no TLS (local development only)
     -tunnel       Start a Cloudflare quick tunnel and print the public mcp.json snippet
                   (implies -dev; requires cloudflared in PATH)
@@ -89,7 +84,6 @@ Commands:
     -cursor       Print only the Cursor setup; with -claude, print both
     -no-browser   Do not open the dashboard in a browser
   status          Show configuration paths and certificate fingerprint
-  keygen          Rotate the API key
   update          Pull the latest source and rebuild what is stale (binary, dashboard)
     -check        Only report what would change
     -force        Discard local changes and local commits (default: stop on conflicts)
@@ -107,9 +101,6 @@ func cmdInit() error {
 	if err != nil {
 		return err
 	}
-	if err := ensureAPIKey(cfg); err != nil {
-		return err
-	}
 	if _, err := os.Stat(cfg.CertFile); os.IsNotExist(err) {
 		if err := security.GenerateSelfSignedCert(cfg.CertFile, cfg.KeyFile); err != nil {
 			return fmt.Errorf("tls: %w", err)
@@ -124,7 +115,7 @@ func cmdInit() error {
 		return err
 	}
 	fmt.Println("Initialized Axon configuration.")
-	fmt.Printf("API key (the AI agent and the dashboard): %s\n", cfg.APIKey)
+	fmt.Println("There is no API key to save: axon serve makes a new one at every start.")
 	fp, err := security.CertFingerprint(cfg.CertFile)
 	if err == nil {
 		fmt.Printf("TLS fingerprint: %s\n", fp)
@@ -157,7 +148,10 @@ func cmdServe() error {
 	if err != nil {
 		return err
 	}
-	if err := cfg.Validate(); err != nil {
+	// The key lives in memory only. It dies with this process, so a restart is
+	// the key rotation.
+	key, err := genKey()
+	if err != nil {
 		return err
 	}
 	if *addr != "" {
@@ -192,13 +186,13 @@ func cmdServe() error {
 
 		printBanner(version)
 		fmt.Printf("  %s  DEV MODE — plain HTTP, no TLS. Do not expose this port externally.\n\n", alertStyle.Render("⚠"))
-		printServerInfo(listenLine, dashboardURL, cfg.APIKey)
+		printServerInfo(listenLine, dashboardURL, key)
 
 		switch {
 		case useNamedTunnel:
 			mcpURL := *tunnelURL + "/mcp"
 			fmt.Printf("  %s Named Cloudflare Tunnel: %s\n\n", boldStyle.Render("☁"), cyanStyle.Render(*tunnelURL))
-			printClients(clients, mcpURL, cfg.APIKey, server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey), true)
+			printClients(clients, mcpURL, key, server.PrettyMCPConfigForURL("axon", mcpURL, key), true)
 			fmt.Printf("  Starting named tunnel %q…\n\n", *tunnelName)
 			go func() {
 				if err := tunnel.StartNamedTunnel(ctx, *tunnelName); err != nil && ctx.Err() == nil {
@@ -213,7 +207,7 @@ func cmdServe() error {
 				err := tunnel.StartTrycloudflare(ctx, localURL, func(publicURL string) {
 					mcpURL := publicURL + "/mcp"
 					fmt.Printf("\n  %s Cloudflare Tunnel ready: %s\n\n", boldStyle.Render("☁"), cyanStyle.Render(publicURL))
-					printClients(clients, mcpURL, cfg.APIKey, server.PrettyMCPConfigForURL("axon", mcpURL, cfg.APIKey), true)
+					printClients(clients, mcpURL, key, server.PrettyMCPConfigForURL("axon", mcpURL, key), true)
 				})
 				if err != nil && ctx.Err() == nil {
 					fmt.Fprintf(os.Stderr, "\ncloudflared error: %v\n", err)
@@ -222,7 +216,7 @@ func cmdServe() error {
 
 		default:
 			mcpURL := fmt.Sprintf("http://%s:%d/mcp", cfg.ListenAddr, cfg.ListenPort)
-			printClients(clients, mcpURL, cfg.APIKey, server.PrettyMCPDevConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey), false)
+			printClients(clients, mcpURL, key, server.PrettyMCPDevConfig(cfg.ListenAddr, cfg.ListenPort, key), false)
 		}
 
 		if !*noBrowser {
@@ -232,10 +226,12 @@ func cmdServe() error {
 		}
 
 		return server.Run(ctx, cfg, deny, log, server.Options{
-			Version: version,
-			Events:  bus,
-			Hub:     h,
-			DevMode: true,
+			Version:      version,
+			APIKey:       key,
+			Events:       bus,
+			Hub:          h,
+			DevMode:      true,
+			BehindTunnel: *useTunnel || useNamedTunnel,
 		})
 	}
 
@@ -252,11 +248,11 @@ func cmdServe() error {
 	listenLine := fmt.Sprintf("https://%s:%d/mcp", cfg.ListenAddr, cfg.ListenPort)
 
 	printBanner(version)
-	printServerInfo(listenLine, dashboardURL, cfg.APIKey,
+	printServerInfo(listenLine, dashboardURL, key,
 		fmt.Sprintf("  %s %s", boldStyle.Render("TLS fingerprint:"), dimStyle.Render(fp)),
 	)
 
-	printClients(clients, mcpURL, cfg.APIKey, server.PrettyMCPConfig(cfg.ListenAddr, cfg.ListenPort, cfg.APIKey), true)
+	printClients(clients, mcpURL, key, server.PrettyMCPConfig(cfg.ListenAddr, cfg.ListenPort, key), true)
 
 	if !*noBrowser {
 		go openBrowser(dashboardURL)
@@ -264,6 +260,7 @@ func cmdServe() error {
 
 	return server.Run(ctx, cfg, deny, log, server.Options{
 		Version: version,
+		APIKey:  key,
 		Events:  bus,
 		Hub:     h,
 	})
@@ -319,36 +316,6 @@ func cmdStatus() error {
 	} else {
 		fmt.Printf("fingerprint:    %s\n", fp)
 	}
-	if cfg.APIKey != "" {
-		fmt.Printf("api key set:    yes\n")
-	} else {
-		fmt.Printf("api key set:    no — run axon init\n")
-	}
-	return nil
-}
-
-func cmdKeygen() error {
-	if err := rootcheck.EnsureNotRoot(); err != nil {
-		return err
-	}
-	fs := flag.NewFlagSet("keygen", flag.ContinueOnError)
-	if err := fs.Parse(os.Args[2:]); err != nil {
-		return err
-	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	k, err := genKey()
-	if err != nil {
-		return err
-	}
-	cfg.APIKey = k
-	if err := cfg.Save(); err != nil {
-		return err
-	}
-	fmt.Printf("New API key: %s\n", k)
-	fmt.Println("Restart axon serve to use it.")
 	return nil
 }
 
@@ -391,19 +358,7 @@ func cmdUpdate() error {
 // apiKeyPrefix starts the one key: the AI agent's and the dashboard's.
 const apiKeyPrefix = "axon_k_"
 
-// ensureAPIKey creates the API key if it is missing.
-func ensureAPIKey(cfg *config.Config) error {
-	if cfg.APIKey != "" {
-		return nil
-	}
-	k, err := genKey()
-	if err != nil {
-		return err
-	}
-	cfg.APIKey = k
-	return nil
-}
-
+// genKey makes a 256-bit key from crypto/rand.
 func genKey() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {

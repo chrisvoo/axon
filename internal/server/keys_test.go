@@ -36,6 +36,13 @@ type testServer struct {
 
 func startServer(t *testing.T) *testServer {
 	t.Helper()
+	return startServerWith(t, nil, nil)
+}
+
+// startServerWith starts a server on a free port. tune may change the config and the
+// options before Run.
+func startServerWith(t *testing.T, tuneCfg func(*config.Config), tuneOpts func(*Options)) *testServer {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
@@ -47,10 +54,12 @@ func startServer(t *testing.T) *testServer {
 	cfg := &config.Config{
 		ListenAddr:    "127.0.0.1",
 		ListenPort:    port,
-		APIKey:        "the-key",
 		ShellTimeout:  "30s",
 		InputStallSec: 1,
 		AuditLog:      filepath.Join(dir, "audit.log"),
+	}
+	if tuneCfg != nil {
+		tuneCfg(cfg)
 	}
 	deny, err := security.LoadDenylist("")
 	if err != nil {
@@ -66,11 +75,15 @@ func startServer(t *testing.T) *testServer {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_ = Run(ctx, cfg, deny, log, Options{Version: "test", Events: bus, Hub: hub.NewHub(bus, "test"), DevMode: true})
+		opts := Options{Version: "test", APIKey: "the-key", Events: bus, Hub: hub.NewHub(bus, "test"), DevMode: true}
+		if tuneOpts != nil {
+			tuneOpts(&opts)
+		}
+		_ = Run(ctx, cfg, deny, log, opts)
 	}()
 	t.Cleanup(func() { cancel(); <-done })
 
-	ts := &testServer{url: fmt.Sprintf("http://127.0.0.1:%d", port), key: cfg.APIKey, audit: cfg.AuditLog}
+	ts := &testServer{url: fmt.Sprintf("http://127.0.0.1:%d", port), key: "the-key", audit: cfg.AuditLog}
 	deadline := time.Now().Add(5 * time.Second)
 	for time.Now().Before(deadline) {
 		if resp, err := client.Get(ts.url + "/health"); err == nil {

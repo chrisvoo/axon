@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"net/http"
 	"path"
+	"slices"
 	"strings"
 	"time"
 
@@ -240,12 +241,16 @@ func (s *Server) handleToolsCall(ctx context.Context, w http.ResponseWriter, req
 		start, _ := toInt(params.Arguments["start_line"])
 		end, _ := toInt(params.Arguments["end_line"])
 		s.Audit.Log(audit.Entry{RemoteIP: remoteIP, Action: "read_file", Detail: path})
-		text, err = tools.ReadFile(path, start, end)
+		if err = s.guardPath(path); err == nil {
+			text, err = tools.ReadFile(path, start, end)
+		}
 	case "write_file":
 		path, _ := params.Arguments["path"].(string)
 		content, _ := params.Arguments["content"].(string)
 		s.Audit.Log(audit.Entry{RemoteIP: remoteIP, Action: "write_file", Detail: path})
-		err = tools.WriteFile(s.Cfg, path, content)
+		if err = s.guardPath(path); err == nil {
+			err = tools.WriteFile(s.Cfg, path, content)
+		}
 		if err == nil {
 			text = "ok"
 		}
@@ -254,7 +259,9 @@ func (s *Server) handleToolsCall(ctx context.Context, w http.ResponseWriter, req
 		oldS, _ := params.Arguments["old_string"].(string)
 		newS, _ := params.Arguments["new_string"].(string)
 		s.Audit.Log(audit.Entry{RemoteIP: remoteIP, Action: "edit_file", Detail: path})
-		err = tools.EditFile(s.Cfg, path, oldS, newS)
+		if err = s.guardPath(path); err == nil {
+			err = tools.EditFile(s.Cfg, path, oldS, newS)
+		}
 		if err == nil {
 			text = "ok"
 		}
@@ -264,8 +271,15 @@ func (s *Server) handleToolsCall(ctx context.Context, w http.ResponseWriter, req
 		maxF, _ := toInt(params.Arguments["max_files"])
 		s.Audit.Log(audit.Entry{RemoteIP: remoteIP, Action: "grep", Detail: root})
 		var hits []map[string]any
-		hits, err = tools.Grep(root, pattern, maxF)
+		if err = s.guardPath(root); err == nil {
+			hits, err = tools.Grep(root, pattern, maxF)
+		}
 		if err == nil {
+			// A root above the config folder walks into it: drop those hits.
+			hits = slices.DeleteFunc(hits, func(h map[string]any) bool {
+				p, _ := h["path"].(string)
+				return s.guardPath(p) != nil
+			})
 			b, _ := json.Marshal(hits)
 			text = string(b)
 		}
@@ -274,8 +288,11 @@ func (s *Server) handleToolsCall(ctx context.Context, w http.ResponseWriter, req
 		pattern, _ := params.Arguments["pattern"].(string)
 		s.Audit.Log(audit.Entry{RemoteIP: remoteIP, Action: "glob", Detail: root})
 		var paths []string
-		paths, err = tools.Glob(root, pattern)
+		if err = s.guardPath(root); err == nil {
+			paths, err = tools.Glob(root, pattern)
+		}
 		if err == nil {
+			paths = slices.DeleteFunc(paths, func(p string) bool { return s.guardPath(p) != nil })
 			b, _ := json.Marshal(paths)
 			text = string(b)
 		}
@@ -353,6 +370,16 @@ func (s *Server) handleToolsCall(ctx context.Context, w http.ResponseWriter, req
 	writeRPCResult(w, req.ID, map[string]any{
 		"content": []map[string]any{{"type": "text", "text": text}},
 	})
+}
+
+// guardPath refuses the files that Axon keeps for itself: the config folder, and the
+// audit log, denylist and TLS files when the config puts them elsewhere. It is a
+// guardrail for the file tools. The shell tool can still reach these files.
+func (s *Server) guardPath(p string) error {
+	if tools.InsideAny(p, s.Cfg.Dir(), s.Cfg.AuditLog, s.Cfg.DenylistFile, s.Cfg.CertFile, s.Cfg.KeyFile) {
+		return fmt.Errorf("path is protected: the file tools do not touch the Axon config folder")
+	}
+	return nil
 }
 
 func toInt(v any) (int, bool) {

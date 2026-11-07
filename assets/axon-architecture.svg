@@ -38,22 +38,22 @@
   <!-- Shared guards -->
   <rect x="30" y="200" width="900" height="46" rx="9" fill="#D3F2E6" stroke="#1D9E75" stroke-width="1"/>
   <text x="480" y="221" text-anchor="middle" font-size="14" font-weight="600" fill="#0F5E48">Shared guards on /mcp and /ws</text>
-  <text x="480" y="238" text-anchor="middle" font-size="11.5" fill="#1B7A5C">IP allowlist, then rate limit</text>
+  <text x="480" y="238" text-anchor="middle" font-size="11.5" fill="#1B7A5C">client IP (CF-Connecting-IP behind a tunnel), IP allowlist, failed-key block, rate limit</text>
 
   <!-- Arrows into the two key checks -->
   <line x1="175" y1="246" x2="175" y2="270" stroke="#1D9E75" stroke-width="1.6" marker-end="url(#m)"/>
   <line x1="785" y1="246" x2="785" y2="270" stroke="#4A93E8" stroke-width="1.6" marker-end="url(#b)"/>
 
-  <!-- Row D: key checks and config -->
+  <!-- Row D: key checks and the in-memory key -->
   <rect x="30" y="270" width="290" height="66" rx="9" fill="#D3F2E6" stroke="#1D9E75" stroke-width="1"/>
   <text x="175" y="292" text-anchor="middle" font-size="14" font-weight="600" fill="#0F5E48">API key check</text>
   <text x="175" y="310" text-anchor="middle" font-size="11.5" fill="#1B7A5C">POST /mcp: Authorization Bearer header</text>
-  <text x="175" y="326" text-anchor="middle" font-size="11.5" fill="#1B7A5C">constant-time compare with the API key</text>
+  <text x="175" y="326" text-anchor="middle" font-size="11.5" fill="#1B7A5C">constant-time compare with the key in memory</text>
 
   <rect x="345" y="270" width="270" height="66" rx="9" fill="#EDEAE3"/>
-  <text x="480" y="292" text-anchor="middle" font-size="14" font-weight="600" fill="#2b2a28">config.yaml (mode 0600)</text>
-  <text x="480" y="310" text-anchor="middle" font-size="11.5" fill="#5c5a55">API key: clear text</text>
-  <text x="480" y="326" text-anchor="middle" font-size="11.5" fill="#5c5a55">one key for the agent and the dashboard</text>
+  <text x="480" y="292" text-anchor="middle" font-size="14" font-weight="600" fill="#2b2a28">API key: memory only</text>
+  <text x="480" y="310" text-anchor="middle" font-size="11.5" fill="#5c5a55">made by axon serve at every start</text>
+  <text x="480" y="326" text-anchor="middle" font-size="11.5" fill="#5c5a55">never saved: a restart is a new key</text>
   <line x1="345" y1="303" x2="322" y2="303" stroke="#8a8a8a" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#g)"/>
   <line x1="615" y1="303" x2="638" y2="303" stroke="#8a8a8a" stroke-width="1.3" stroke-dasharray="4 3" marker-end="url(#g)"/>
 
@@ -94,7 +94,7 @@
 
   <rect x="345" y="452" width="270" height="58" rx="9" fill="#FCE4CC" stroke="#D9822B" stroke-width="1"/>
   <text x="480" y="477" text-anchor="middle" font-size="14" font-weight="600" fill="#7A3E10">Audit log</text>
-  <text x="480" y="495" text-anchor="middle" font-size="11.5" fill="#9A5418">JSON lines, mode 0600</text>
+  <text x="480" y="495" text-anchor="middle" font-size="11.5" fill="#9A5418">JSON lines, mode 0600, failed keys too</text>
 
   <line x1="320" y1="481" x2="343" y2="481" stroke="#D9822B" stroke-width="1.6" marker-end="url(#o)"/>
 
@@ -106,7 +106,7 @@
 
   <rect x="30" y="538" width="290" height="58" rx="9" fill="#D3F2E6" stroke="#1D9E75" stroke-width="1"/>
   <text x="175" y="563" text-anchor="middle" font-size="14" font-weight="600" fill="#0F5E48">Tools</text>
-  <text x="175" y="581" text-anchor="middle" font-size="11.5" fill="#1B7A5C">shell, files, grep, glob</text>
+  <text x="175" y="581" text-anchor="middle" font-size="11.5" fill="#1B7A5C">shell, files, grep, glob (not the config folder)</text>
 
   <!-- Host OS -->
   <line x1="175" y1="596" x2="175" y2="630" stroke="#1D9E75" stroke-width="1.6" marker-end="url(#m)"/>
@@ -130,5 +130,5 @@
   <rect x="360" y="814" width="14" height="14" rx="3" fill="#FCE4CC" stroke="#D9822B"/>
   <text x="382" y="826" font-size="11.5" fill="#a0a0a4">Event and audit path</text>
   <rect x="560" y="814" width="14" height="14" rx="3" fill="#EDEAE3"/>
-  <text x="582" y="826" font-size="11.5" fill="#a0a0a4">Actors, config, host</text>
+  <text x="582" y="826" font-size="11.5" fill="#a0a0a4">Actors, key, host</text>
 </svg>

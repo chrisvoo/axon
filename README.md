@@ -17,8 +17,8 @@ Axon is a standalone Go agent. It exposes an [MCP](https://modelcontextprotocol.
 
 ## Features
 
-- One key: the API key (`axon_k_...`) opens `/mcp` as `Authorization: Bearer`. The dashboard uses the same key. It sends the key in the WebSocket `Sec-WebSocket-Protocol` header, never in the URL.
-- Optional IP allowlist and per-IP rate limiting
+- One key: `axon serve` makes a new API key (`axon_k_...`) at every start and keeps it in memory. It is never saved to disk. The key opens `/mcp` as `Authorization: Bearer`. The dashboard uses the same key. It sends the key in the WebSocket `Sec-WebSocket-Protocol` header, never in the URL.
+- Optional IP allowlist and per-IP rate limiting. Behind a Cloudflare tunnel, both use the real client address. After 5 wrong keys in a row, an address is blocked for 60 seconds, and each wrong key goes to the audit log.
 - Command denylist and read-only mode
 - Interactive commands: a command that waits for input returns `input_required`. The agent answers a confirmation prompt with `send_input` (for example `yes`), or stops the command with `cancel_command`. A command that asks for a password cannot be answered through Axon.
 - Audit log (JSON lines) for every tool call
@@ -56,16 +56,16 @@ make build                    # also rebuilds the dashboard (needs pnpm)
 On the remote machine:
 
 ```bash
-axon init    # creates ~/.axon/ with the API key, TLS certificate and denylist
+axon init    # creates ~/.axon/ with the TLS certificate and the denylist
 axon serve   # listens on https://0.0.0.0:8443/mcp
-axon update. # update a build from a git clone (Linux or macOS)
+axon update  # update a build from a git clone (Linux or macOS)
 ```
 
-`axon init` and `axon serve` show the API key. The agent and the dashboard use this one key. Treat it like a password. `axon keygen` makes a new one.
+`axon serve` makes a new API key at every start and shows it. The agent and the dashboard use this one key. Treat it like a password. Axon keeps the key in memory and never saves it. To rotate the key, stop `axon serve` and start it again. You then get a new key and a new dashboard link, and you must update the MCP configuration of the agent.
 
 `axon serve` prints the API key, the TLS fingerprint and ready-to-paste client configuration. The Dashboard line is a clickable link that holds the API key after the `#`, so one click connects (your terminal must support hyperlinks, for example iTerm2, WezTerm or Kitty). Axon also opens the dashboard in your browser, but without the key in the address: click the link or paste the API key into the page. Use `-no-browser` to skip opening the browser.
 
-If you upgrade from version 1.x, you do not need to change anything. The operator key is gone: the dashboard now takes the API key. Axon ignores the old `operator_key_hash` line in `config.yaml` and drops it the next time it saves the file.
+If you upgrade from version 2.x, the key in `config.yaml` is no longer used, and `axon keygen` is gone. Axon ignores the old `api_key` line (and the 1.x `operator_key_hash` line). `axon init` removes them from the file. Delete the line by hand if you do not run `axon init`.
 
 To update a build from a git clone (Linux or macOS), run `axon update`. It pulls the source and rebuilds what is stale. Restart `axon serve` to run the new build. Add `-check` to preview the changes. See [Commands](#commands).
 
@@ -73,7 +73,7 @@ To update a build from a git clone (Linux or macOS), run `axon update`. It pulls
 
 ## Connect an AI agent
 
-Use the values from `axon serve` on the machine where your agent runs.
+Use the values from `axon serve` on the machine where your agent runs. The key changes at every start, so update the MCP configuration of the agent after each restart.
 
 **Claude Code**
 
@@ -119,7 +119,7 @@ Tunnel modes serve plain HTTP on `127.0.0.1`. `cloudflared` provides the public 
 axon serve -tunnel
 ```
 
-Axon starts `cloudflared` and prints the client configuration for the new `trycloudflare.com` URL. The URL changes on every restart.
+Axon starts `cloudflared` and prints the client configuration for the new `trycloudflare.com` URL. The URL and the API key change on every restart.
 
 **Named tunnel** (permanent URL). Set up once, on the remote machine. You need a domain on Cloudflare DNS.
 
@@ -165,8 +165,8 @@ cd web && VITE_DEMO_MODE=true pnpm dev
 
 | Command | Description |
 |---|---|
-| `axon init` | Create the config, API key, TLS certificate and denylist |
-| `axon serve` | Start the HTTPS MCP server |
+| `axon init` | Create the config, TLS certificate and denylist |
+| `axon serve` | Start the HTTPS MCP server. It makes a new API key at every start. |
 | `axon serve -dev` | Plain HTTP on `127.0.0.1`, for local development |
 | `axon serve -tunnel` | Start a Cloudflare quick tunnel (implies `-dev`) |
 | `axon serve -tunnel-name N -tunnel-url U` | Start a named Cloudflare tunnel (implies `-dev`) |
@@ -174,7 +174,6 @@ cd web && VITE_DEMO_MODE=true pnpm dev
 | `axon serve -claude` / `-cursor` | Print only the Claude Code (default) or the Cursor setup. Use both flags for both |
 | `axon serve -no-browser` | Do not open the dashboard |
 | `axon status` | Show the config paths and the certificate fingerprint |
-| `axon keygen` | Rotate the API key (restart `axon serve` to apply it) |
 | `axon update` | Pull the latest source and rebuild what is stale (restart `axon serve` to apply it) |
 | `axon update -check` | Show what an update would change, and change nothing |
 | `axon update -force` | Update and discard local changes and commits |
@@ -183,7 +182,7 @@ cd web && VITE_DEMO_MODE=true pnpm dev
 
 ## Configuration
 
-Axon merges `~/.axon/config.yaml` over the built-in defaults.
+Axon merges `~/.axon/config.yaml` over the built-in defaults. The file holds no API key.
 
 | Key | Default | Meaning |
 |---|---|---|
@@ -202,8 +201,8 @@ Axon merges `~/.axon/config.yaml` over the built-in defaults.
 | Tool | Purpose |
 |---|---|
 | `shell` | Run a shell command (bash or sh on Unix, PowerShell or cmd on Windows). A command that contains `sudo` never runs. It returns `{"status":"requires_user_action"}` and the dashboard shows the command. |
-| `read_file` | Read a file (optional 1-based line range) |
-| `write_file` | Write or overwrite a file |
+| `read_file` | Read a file (optional 1-based line range). The file tools refuse the Axon config folder. |
+| `write_file` | Write or overwrite a file. The request body is limited to 16 MiB. |
 | `edit_file` | Replace a unique string in a file |
 | `grep` | Regex search under a directory |
 | `glob` | Find files by base-name pattern under a directory |
@@ -213,11 +212,11 @@ Axon merges `~/.axon/config.yaml` over the built-in defaults.
 
 ## Security notes
 
-Axon gives an agent a shell on your machine. The API key is the main boundary: anyone who has it can do what the Axon user can do. The denylist and the `sudo` check are guardrails, not a sandbox.
+Axon gives an agent a shell on your machine. The API key is the main boundary: anyone who has it can do what the Axon user can do. The key lives in memory for one run. The denylist, the `sudo` check and the refusal of the config folder by the file tools are guardrails, not a sandbox.
 
 [docs/SECURITY.md](docs/SECURITY.md) has two parts:
 
-- **Security notes**: how to run Axon safely. It covers key handling, a dedicated unprivileged user, passwords in commands, tunnel mode and the denylist.
+- **Security notes**: how to run Axon safely. It covers the memory-only key, a dedicated unprivileged user, passwords in commands, tunnel mode and the denylist.
 - **Security review**: the findings of a full review (high, medium and low), the record of what version 2.0.0 removed, and a priority list of fixes.
 
 For how the parts fit together, see [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).

@@ -5,6 +5,7 @@ import (
 	"crypto/tls"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/fs"
 	"net"
@@ -25,14 +26,35 @@ import (
 // Options for HTTPS server.
 type Options struct {
 	Version string
-	Events  *events.Bus
-	Hub     *hub.Hub
+	// APIKey is the one key. The caller makes it at start and keeps it in memory.
+	// Run refuses to start without it.
+	APIKey string
+	Events *events.Bus
+	Hub    *hub.Hub
 	// DevMode disables TLS and runs plain HTTP. For local development only.
 	DevMode bool
+	// BehindTunnel is true when cloudflared forwards the requests. Every request
+	// then comes from loopback, and the client address is in CF-Connecting-IP.
+	BehindTunnel bool
 }
+
+const (
+	// maxBodyBytes caps a POST /mcp body. A write_file larger than this fails.
+	maxBodyBytes = 16 << 20
+	// contentSecurityPolicy fits the dashboard: its own script and CSS, Google Fonts, no
+	// frames. connect-src 'self' lets the page open its own WebSocket and nothing else,
+	// so a script in the page cannot send the key to another host.
+	contentSecurityPolicy = "default-src 'self'; script-src 'self'; " +
+		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+		"font-src https://fonts.gstatic.com; img-src 'self' data:; connect-src 'self'; " +
+		"frame-ancestors 'none'; base-uri 'none'; form-action 'none'; object-src 'none'"
+)
 
 // Run starts the HTTPS server until context is cancelled.
 func Run(ctx context.Context, cfg *config.Config, deny *security.Denylist, log *audit.Logger, opts Options) error {
+	if opts.APIKey == "" {
+		return errors.New("no API key: the caller must make one for this run")
+	}
 	pm := tools.NewProcManager()
 	mcpSrv := &mcp.Server{
 		Cfg:     cfg,
@@ -44,6 +66,7 @@ func Run(ctx context.Context, cfg *config.Config, deny *security.Denylist, log *
 	}
 
 	rl := security.NewRateLimiter(cfg.RateLimitRPS)
+	guard := security.NewAuthGuard()
 
 	webFS, err := fs.Sub(dashboard.FS, "dist")
 	if err != nil {
@@ -57,15 +80,17 @@ func Run(ctx context.Context, cfg *config.Config, deny *security.Denylist, log *
 		_, _ = w.Write([]byte("ok"))
 	})
 
+	clientIP := func(r *http.Request) string { return security.ClientIP(r, opts.BehindTunnel) }
+
 	secure := func(next http.HandlerFunc) http.HandlerFunc {
 		return func(w http.ResponseWriter, r *http.Request) {
-			remoteIP := r.RemoteAddr
-			if !security.IPAllowed(r, cfg.IPAllowlist) {
+			ip := clientIP(r)
+			if !security.IPAllowed(ip, cfg.IPAllowlist) {
 				http.Error(w, "forbidden", http.StatusForbidden)
-				mcpSrv.Audit.Log(audit.Entry{RemoteIP: remoteIP, Action: "deny_ip"})
+				mcpSrv.Audit.Log(audit.Entry{RemoteIP: ip, Action: "deny_ip"})
 				return
 			}
-			if !rl.Allow(r) {
+			if guard.Blocked(ip) || !rl.Allow(ip) {
 				http.Error(w, "rate limited", http.StatusTooManyRequests)
 				return
 			}
@@ -74,15 +99,32 @@ func Run(ctx context.Context, cfg *config.Config, deny *security.Denylist, log *
 	}
 
 	// There is one key. It opens /mcp as a Bearer token and /ws as a subprotocol.
-	apiKeyOK := func(token string) bool { return security.ConstantTimeEqual(token, cfg.APIKey) }
+	apiKeyOK := func(token string) bool { return security.ConstantTimeEqual(token, opts.APIKey) }
+
+	// keyChecked records the result of a key check. A wrong key goes to the audit
+	// log. After a few in a row the address is blocked, and the blocked requests
+	// leave no line, so a scanner cannot fill the log.
+	keyChecked := func(ip, route string, ok bool) bool {
+		if ok {
+			guard.OK(ip)
+			return true
+		}
+		detail := route
+		if guard.Fail(ip) {
+			detail += " (address blocked for 60 s)"
+		}
+		mcpSrv.Audit.Log(audit.Entry{RemoteIP: ip, Action: "auth_fail", Detail: detail})
+		return false
+	}
 
 	mux.HandleFunc("POST /mcp", secure(func(w http.ResponseWriter, r *http.Request) {
-		token := security.BearerToken(r)
-		if token == "" || !apiKeyOK(token) {
+		ip := clientIP(r)
+		if !keyChecked(ip, "/mcp", apiKeyOK(security.BearerToken(r))) {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
 			return
 		}
-		mcpSrv.HandleJSONRPC(r.Context(), w, r, r.RemoteAddr)
+		r.Body = http.MaxBytesReader(w, r.Body, maxBodyBytes)
+		mcpSrv.HandleJSONRPC(r.Context(), w, r, ip)
 	}))
 
 	// The dashboard is read-only. It sends the key in the Sec-WebSocket-Protocol
@@ -92,7 +134,8 @@ func Run(ctx context.Context, cfg *config.Config, deny *security.Denylist, log *
 			http.Error(w, "dashboard unavailable", http.StatusServiceUnavailable)
 			return
 		}
-		opts.Hub.ServeWS(w, r, apiKeyOK)
+		ip := clientIP(r)
+		opts.Hub.ServeWS(w, r, func(key string) bool { return keyChecked(ip, "/ws", apiKeyOK(key)) })
 	}))
 
 	mux.Handle("GET /", staticServer)
@@ -105,7 +148,11 @@ func Run(ctx context.Context, cfg *config.Config, deny *security.Denylist, log *
 	addr := fmt.Sprintf("%s:%d", cfg.ListenAddr, cfg.ListenPort)
 
 	srv := &http.Server{
-		Handler: loggingMiddleware(mux),
+		Handler:           securityHeaders(mux),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       60 * time.Second,
+		IdleTimeout:       120 * time.Second,
+		// No WriteTimeout: a shell command may run for shell_timeout (5 minutes).
 	}
 
 	var ln net.Listener
@@ -145,8 +192,16 @@ func Run(ctx context.Context, cfg *config.Config, deny *security.Denylist, log *
 	}
 }
 
-func loggingMiddleware(next http.Handler) http.Handler {
+// securityHeaders sets the browser defenses on every response. The dashboard page
+// holds the API key, so a script that runs in it could use the key. no-referrer
+// keeps the tunnel address out of the request to Google Fonts.
+func securityHeaders(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h := w.Header()
+		h.Set("Content-Security-Policy", contentSecurityPolicy)
+		h.Set("X-Frame-Options", "DENY")
+		h.Set("X-Content-Type-Options", "nosniff")
+		h.Set("Referrer-Policy", "no-referrer")
 		next.ServeHTTP(w, r)
 	})
 }

@@ -2,20 +2,16 @@ package security
 
 import (
 	"net"
-	"net/http"
 	"strings"
 )
 
-// IPAllowed returns true if allowlist is empty or remote IP is in the list.
-func IPAllowed(r *http.Request, allowlist []string) bool {
+// IPAllowed returns true if allowlist is empty or the address is in the list.
+// addr is a bare IP, as ClientIP returns it.
+func IPAllowed(addr string, allowlist []string) bool {
 	if len(allowlist) == 0 {
 		return true
 	}
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		host = r.RemoteAddr
-	}
-	ip := net.ParseIP(host)
+	ip := net.ParseIP(addr)
 	if ip == nil {
 		return false
 	}

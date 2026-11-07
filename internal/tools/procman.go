@@ -126,6 +126,13 @@ func (m *ProcManager) SnapshotOutput(id string) string {
 	return p.snapshot()
 }
 
+// Count returns the number of tracked running processes.
+func (m *ProcManager) Count() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return len(m.procs)
+}
+
 // Remove deletes a process id.
 func (m *ProcManager) Remove(id string) {
 	m.mu.Lock()

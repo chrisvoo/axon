@@ -1,8 +1,6 @@
 package security
 
 import (
-	"net"
-	"net/http"
 	"sync"
 
 	"golang.org/x/time/rate"
@@ -26,23 +24,18 @@ func NewRateLimiter(rps float64) *RateLimiter {
 	}
 }
 
-func clientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
-}
-
-// Allow returns false if rate limited.
-func (rl *RateLimiter) Allow(r *http.Request) bool {
+// Allow returns false if the address is rate limited. ip comes from ClientIP.
+func (rl *RateLimiter) Allow(ip string) bool {
 	if rl.rps <= 0 {
 		return true
 	}
-	ip := clientIP(r)
 	rl.mu.Lock()
 	lim, ok := rl.limits[ip]
 	if !ok {
+		if len(rl.limits) >= maxTrackedIPs {
+			// ponytail: drop all limiters at the cap. Upgrade to an LRU if scans reach it.
+			rl.limits = make(map[string]*rate.Limiter)
+		}
 		lim = rate.NewLimiter(rate.Limit(rl.rps), int(rl.rps)+1)
 		rl.limits[ip] = lim
 	}

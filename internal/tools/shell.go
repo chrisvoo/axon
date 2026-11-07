@@ -3,12 +3,17 @@ package tools
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os/exec"
 	"time"
 
 	"github.com/chrisvoo/axon/internal/config"
 	"github.com/chrisvoo/axon/internal/security"
 )
+
+// MaxRunningCommands caps the shell commands that run at once. An agent that loops
+// and starts commands cannot use up the process and pty table of the host.
+const MaxRunningCommands = 16
 
 // ShellResult is returned from the shell tool.
 type ShellResult struct {
@@ -31,6 +36,11 @@ func RunShell(ctx context.Context, cfg *config.Config, deny *security.Denylist, 
 	}
 	if deny != nil && deny.Match(command) {
 		return ShellResult{Status: "error", ErrorMessage: "command blocked by denylist"}, nil
+	}
+	// ponytail: check then start, so a burst of parallel calls can pass the cap by a few.
+	// Upgrade to a counter taken under the lock if that matters.
+	if pm != nil && pm.Count() >= MaxRunningCommands {
+		return ShellResult{Status: "error", ErrorMessage: fmt.Sprintf("too many running commands (limit %d): wait for one to end or use cancel_command", MaxRunningCommands)}, nil
 	}
 	timeout := cfg.ShellTimeoutDuration()
 	stall := time.Duration(cfg.InputStallSec) * time.Second

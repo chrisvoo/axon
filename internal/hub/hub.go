@@ -47,9 +47,8 @@ func NewHub(bus *events.Bus, version string) *Hub {
 			ReadBufferSize:  1024,
 			WriteBufferSize: 4096,
 			Subprotocols:    []string{Subprotocol},
-			CheckOrigin: func(r *http.Request) bool {
-				return true
-			},
+			// No CheckOrigin: the default accepts a request with no Origin header
+			// (not a browser) and a browser request whose Origin host equals Host.
 		},
 	}
 }

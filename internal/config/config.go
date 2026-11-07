@@ -43,8 +43,9 @@ type Config struct {
 	DenylistFile  string   `yaml:"denylist_file"`
 	CertFile      string   `yaml:"cert_file"`
 	KeyFile       string   `yaml:"key_file"`
-	APIKey        string   `yaml:"api_key"` // the one key: /mcp (Bearer header) and /ws (subprotocol)
 
+	// There is no API key here. `axon serve` makes one at every start and keeps it
+	// in memory (server.Options.APIKey). An old `api_key:` line is ignored.
 	configDir string
 }
 
@@ -136,14 +137,6 @@ func (c *Config) IdleTimeoutDuration() time.Duration {
 		return 0
 	}
 	return d
-}
-
-// Validate checks that the API key exists.
-func (c *Config) Validate() error {
-	if c.APIKey == "" {
-		return fmt.Errorf("missing API key: run axon init")
-	}
-	return nil
 }
 
 // DenylistPath returns absolute path to denylist file.

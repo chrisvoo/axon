@@ -18,17 +18,17 @@ Keep the documents true. A change that fixes a finding updates its entry in `doc
 
 ```bash
 make build                       # compile the dashboard, then the Go binary (./axon)
-./axon init                      # first time only: API key, TLS cert, denylist in ~/.axon/
+./axon init                      # first time only: TLS cert, denylist in ~/.axon/
 make dev                         # plain HTTP on 127.0.0.1, no TLS, for local development
 ./axon update                    # later: pull the source and rebuild what is stale
 ```
 
-`axon init` and `axon serve` show the one API key. The agent and the dashboard both use it. `axon update` never restarts `axon serve`: restart it to run the new build.
+`axon serve` makes a new API key at every start and shows it. The agent and the dashboard both use it. `axon update` never restarts `axon serve`: restart it to run the new build, and update the agent with the new key.
 
 ## Commands
 
 ```bash
-# First-time setup (generates API key, TLS cert, denylist in ~/.axon/).
+# First-time setup (generates the TLS cert and the denylist in ~/.axon/).
 ./axon init
 
 # Pull the latest source and rebuild what is stale
@@ -75,7 +75,7 @@ Axon is a **remote MCP (Model Context Protocol) server**. It exposes the machine
 ```
 AI client (Claude / Cursor)
   → POST /mcp (Bearer API key). The dashboard uses the same key on /ws (Sec-WebSocket-Protocol header).
-  → internal/server — IP allowlist, rate limit, then the API key check
+  → internal/server — client IP, IP allowlist, failed-key block, rate limit, then the API key check
   → internal/mcp — JSON-RPC 2.0 dispatch (handleToolsCall)
   → internal/tools — shell / file / search execution
   → events.Bus.Publish() → Hub → WebSocket broadcast → React dashboard
@@ -83,14 +83,14 @@ AI client (Claude / Cursor)
 
 | Package | Role |
 |---|---|
-| `cmd/axon` | CLI entry point: `init`, `serve`, `status`, `keygen`, `update`, `version`; terminal banner in `startup.go` |
+| `cmd/axon` | CLI entry point: `init`, `serve`, `status`, `update`, `version`; `genKey` makes the key; terminal banner in `startup.go` |
 | `internal/mcp` | JSON-RPC 2.0 handler; all tool dispatch lives in `handleToolsCall` |
-| `internal/tools` | Tool implementations: shell, read/write/edit file, grep, glob, system_info, send_input, cancel_command |
-| `internal/server` | HTTP(S) server, routes (`/mcp`, `/ws`), and the MCP client-config snippet builders used by `cmd/axon` |
+| `internal/tools` | Tool implementations: shell (16 at once), read/write/edit file, grep, glob, system_info, send_input, cancel_command; `InsideAny` for the config-folder guardrail |
+| `internal/server` | HTTP(S) server, routes (`/mcp`, `/ws`), security headers, body limit, and the MCP client-config snippet builders used by `cmd/axon` |
 | `internal/hub` | WebSocket fan-out; subscribes to `events.Bus` and pushes to all dashboard clients |
 | `internal/events` | Simple pub/sub bus (buffered channels, drops on full) |
-| `internal/security` | Bearer-token check, denylist, rate limiter, TLS, IP allowlist |
-| `internal/config` | YAML config loader/saver; embeds the default config and denylist; `Validate` (the API key must exist); paths from `internal/paths` |
+| `internal/security` | Bearer-token check, `ClientIP` (reads `CF-Connecting-IP` behind a tunnel), `AuthGuard` (failed-key block), denylist, rate limiter, TLS, IP allowlist |
+| `internal/config` | YAML config loader/saver; embeds the default config and denylist; paths from `internal/paths`. It holds no API key |
 | `internal/audit` | JSON-lines audit log of tool calls |
 | `internal/update` | `axon update`: git sync, stale-build assessment, rebuild (single file, `Exec`/`Look` seams for tests) |
 | `internal/tunnel` | Cloudflare tunnel integration (`trycloudflare` quick tunnel or named tunnel) |
@@ -113,10 +113,15 @@ These rules are easy to break by accident. The reasons are in [docs/ARCHITECTURE
 
 ### Key and dashboard
 
-- There is one key: `cfg.APIKey`. It opens `/mcp` (Bearer header, checked in `server.go`) and `/ws` (checked in `hub.ServeWS`). `security.ConstantTimeEqual` compares it.
+- There is one key: `server.Options.APIKey`. `cmdServe` makes it with `genKey` at every start. It lives in memory only. Never add it to `Config`, a file or an environment variable, and never pass it to a program. `server.Run` refuses an empty key. It opens `/mcp` (Bearer header, checked in `server.go`) and `/ws` (checked in `hub.ServeWS`). `security.ConstantTimeEqual` compares it. A restart is the key rotation: there is no `keygen` command and no `api_key` config key. An old `api_key:` line is ignored.
+- The client address comes from `security.ClientIP`. It trusts `CF-Connecting-IP` only when `Options.BehindTunnel` is true and the peer is loopback. The allowlist, the rate limit, the `AuthGuard` and the audit entries all use it. Do not read `r.RemoteAddr` for these.
+- A wrong key calls `keyChecked` in `server.go`: it writes an `auth_fail` audit line and counts toward the block (5 in a row, 60 s). A blocked request writes no line.
+- The file tools refuse the config folder through `Server.guardPath` in `mcp.go`. This is a guardrail: `shell` bypasses it. `grep` and `glob` also filter their results with it.
+- Do not set `http.Server.WriteTimeout`: a shell command can run for `shell_timeout`. The server keeps `ReadHeaderTimeout`, `ReadTimeout` and `IdleTimeout`. A `POST /mcp` body is limited to 16 MiB (`maxBodyBytes`).
+- Every response carries the headers from `securityHeaders` in `server.go`. The CSP names Google Fonts and nothing else outside `'self'`. Change it together with `web/index.html`.
 - The dashboard is read-only. There is no route that writes: no `/api/input`, `/api/cancel` or `/api/agent-config`. Do not add one without a new review in `docs/SECURITY.md`.
 - `/ws` takes the key from the `Sec-WebSocket-Protocol` request header: the client offers `axon.v1` and `axon.key.<key>`. `hub.Subprotocol`, `hub.KeyProtocolPrefix` and `hub.CloseUnauthorized` have copies in `web/src/hooks/useAxonSocket.ts`. Keep both sides in step. The key never goes in the URL, and the server never echoes it. A missing or wrong key completes the handshake and closes with code 4401 (a browser cannot read the HTTP status of a failed handshake). The dashboard then asks for a new key.
-- The agent can read `config.yaml`, and the key is in it. The agent already holds the key.
+- The agent can read `config.yaml`, but the key is not in it.
 - The dashboard reads the key from the URL hash (`App.tsx`), keeps it in `sessionStorage` (`API_KEY_STORAGE`) and removes the hash. `ConnectScreen` takes a pasted key. `axon serve` prints a clickable Dashboard link with the key in the fragment (`dashboardLink` in `startup.go`). It opens the browser without a key in the address: a key in the argument of `open` or `xdg-open` shows in `ps`. Never pass `dashboardLink` to a program.
 - The hub fans out every `events.Event` (tool calls, results, input_required, system stats) to all clients. `events.Bus` drops events when a subscriber buffer is full.
 - Axon does not hide text. Shell results, tool text, events and audit lines show exactly what the agent sent and received. A command that needs a password cannot run through Axon: the agent cancels it.
